@@ -191,7 +191,7 @@ func makeFileEntry(configDir, relPath string) (FileEntry, error) {
 	}, nil
 }
 
-func BuildTarGZ(entries []FileEntry) ([]byte, error) {
+func BuildTarGZ(entries []FileEntry, preservePermissions bool) ([]byte, error) {
 	var buf bytes.Buffer
 	gw := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gw)
@@ -202,9 +202,16 @@ func BuildTarGZ(entries []FileEntry) ([]byte, error) {
 			return nil, fmt.Errorf("read %s: %w", entry.RelPath, err)
 		}
 
+		// Determine mode based on preservePermissions setting
+		mode := entry.Mode
+		if !preservePermissions {
+			// Normalize permissions: executables -> 0755, others -> 0644
+			mode = normalizedMode(entry.Mode)
+		}
+
 		hdr := &tar.Header{
 			Name: entry.RelPath,
-			Mode: int64(entry.Mode),
+			Mode: int64(mode),
 			Size: entry.Size,
 		}
 		if err := tw.WriteHeader(hdr); err != nil {
@@ -223,4 +230,12 @@ func BuildTarGZ(entries []FileEntry) ([]byte, error) {
 	}
 
 	return buf.Bytes(), nil
+}
+
+// normalizedMode returns standard permissions: 0755 for executables, 0644 for others
+func normalizedMode(mode fs.FileMode) fs.FileMode {
+	if mode&0111 != 0 { // has any execute bit
+		return 0755
+	}
+	return 0644
 }

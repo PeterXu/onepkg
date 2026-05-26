@@ -70,7 +70,7 @@ after = ["network.target"]
 		t.Fatalf("len(entries) = %d, want 2", len(entries))
 	}
 
-	tarData, err := BuildTarGZ(entries)
+	tarData, err := BuildTarGZ(entries, true)
 	if err != nil {
 		t.Fatalf("BuildTarGZ: %v", err)
 	}

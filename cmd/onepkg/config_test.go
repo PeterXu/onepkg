@@ -575,3 +575,77 @@ working_dir = "/opt/myapp/data"
 		t.Errorf("MacOS.WorkingDir = %q, want %q", cfg.Services[0].MacOS.WorkingDir, "/opt/myapp/data")
 	}
 }
+
+func TestParseConfigWithPreservePermissions(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+
+	// Test explicit true
+	content := `
+name = "myapp"
+version = "v1.0.0"
+preserve_permissions = true
+items = ["bin/myapp"]
+`
+	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := ParseConfig(configPath)
+	if err != nil {
+		t.Fatalf("ParseConfig returned error: %v", err)
+	}
+
+	if cfg.PreservePermissions == nil || !*cfg.PreservePermissions {
+		t.Errorf("PreservePermissions = %v, want true", cfg.PreservePermissions)
+	}
+
+	// Test explicit false
+	contentFalse := `
+name = "myapp"
+version = "v1.0.0"
+preserve_permissions = false
+items = ["bin/myapp"]
+`
+	configPath2 := filepath.Join(dir, "config2.toml")
+	if err := os.WriteFile(configPath2, []byte(contentFalse), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg2, err := ParseConfig(configPath2)
+	if err != nil {
+		t.Fatalf("ParseConfig returned error: %v", err)
+	}
+
+	if cfg2.PreservePermissions == nil || *cfg2.PreservePermissions {
+		t.Errorf("PreservePermissions = %v, want false", cfg2.PreservePermissions)
+	}
+
+	// Test not specified (nil before ApplyDefaults)
+	contentNil := `
+name = "myapp"
+version = "v1.0.0"
+items = ["bin/myapp"]
+`
+	configPath3 := filepath.Join(dir, "config3.toml")
+	if err := os.WriteFile(configPath3, []byte(contentNil), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg3, err := ParseConfig(configPath3)
+	if err != nil {
+		t.Fatalf("ParseConfig returned error: %v", err)
+	}
+
+	// Before ApplyDefaults, should be nil
+	if cfg3.PreservePermissions != nil {
+		t.Errorf("PreservePermissions before ApplyDefaults = %v, want nil", cfg3.PreservePermissions)
+	}
+
+	cfg3.ApplyDefaults()
+
+	// After ApplyDefaults, should be true
+	if cfg3.PreservePermissions == nil || !*cfg3.PreservePermissions {
+		t.Errorf("PreservePermissions after ApplyDefaults = %v, want true", cfg3.PreservePermissions)
+	}
+}

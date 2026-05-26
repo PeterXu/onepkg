@@ -158,7 +158,7 @@ func TestBuildTarGZ(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tarData, err := BuildTarGZ(entries)
+	tarData, err := BuildTarGZ(entries, true) // preservePermissions=true (default behavior)
 	if err != nil {
 		t.Fatalf("BuildTarGZ returned error: %v", err)
 	}
@@ -365,5 +365,133 @@ func TestCollectFilesWithResolvedItems(t *testing.T) {
 	// Should NOT have the platform-suffixed path in RelPath
 	if _, ok := pathMap["bin/myapp.linux-arm64"]; ok {
 		t.Error("should not have bin/myapp.linux-arm64 in RelPath - marker should be stripped")
+	}
+}
+
+func TestBuildTarGZPreservePermissionsFalse(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "bin"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "etc"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create files with various permissions
+	// Executable (0755)
+	if err := os.WriteFile(filepath.Join(dir, "bin", "app"), []byte("hello"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Read-only executable (0500) - should become 0755 when normalized
+	if err := os.WriteFile(filepath.Join(dir, "bin", "run"), []byte("runner"), 0500); err != nil {
+		t.Fatal(err)
+	}
+	// Config file (0644)
+	if err := os.WriteFile(filepath.Join(dir, "etc", "app.conf"), []byte("key=val"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Read-only config (0600) - should become 0644 when normalized
+	if err := os.WriteFile(filepath.Join(dir, "etc", "secret.conf"), []byte("secret"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := CollectFiles(dir, []string{"bin/app", "bin/run", "etc/app.conf", "etc/secret.conf"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tarData, err := BuildTarGZ(entries, false) // preservePermissions=false
+	if err != nil {
+		t.Fatalf("BuildTarGZ returned error: %v", err)
+	}
+
+	gzReader, err := gzip.NewReader(bytes.NewReader(tarData))
+	if err != nil {
+		t.Fatalf("gzip reader error: %v", err)
+	}
+	defer gzReader.Close()
+
+	tarReader := tar.NewReader(gzReader)
+
+	for {
+		hdr, err := tarReader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("tar read error: %v", err)
+		}
+
+		// When preservePermissions=false, all files should have normalized permissions
+		switch hdr.Name {
+		case "bin/app", "bin/run":
+			// Executables should be 0755
+			if hdr.Mode != 0755 {
+				t.Errorf("%s mode = %o, want 0755 (normalized executable)", hdr.Name, hdr.Mode)
+			}
+		case "etc/app.conf", "etc/secret.conf":
+			// Non-executables should be 0644
+			if hdr.Mode != 0644 {
+				t.Errorf("%s mode = %o, want 0644 (normalized file)", hdr.Name, hdr.Mode)
+			}
+		}
+	}
+}
+
+func TestBuildTarGZPreservePermissionsTrue(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "bin"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "etc"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create files with specific permissions that should be preserved
+	if err := os.WriteFile(filepath.Join(dir, "bin", "app"), []byte("hello"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "etc", "app.conf"), []byte("key=val"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := CollectFiles(dir, []string{"bin/app", "etc/app.conf"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tarData, err := BuildTarGZ(entries, true) // preservePermissions=true
+	if err != nil {
+		t.Fatalf("BuildTarGZ returned error: %v", err)
+	}
+
+	gzReader, err := gzip.NewReader(bytes.NewReader(tarData))
+	if err != nil {
+		t.Fatalf("gzip reader error: %v", err)
+	}
+	defer gzReader.Close()
+
+	tarReader := tar.NewReader(gzReader)
+
+	for {
+		hdr, err := tarReader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("tar read error: %v", err)
+		}
+
+		// When preservePermissions=true, original permissions should be preserved
+		switch hdr.Name {
+		case "bin/app":
+			if hdr.Mode != 0755 {
+				t.Errorf("bin/app mode = %o, want 0755 (original preserved)", hdr.Mode)
+			}
+		case "etc/app.conf":
+			if hdr.Mode != 0600 {
+				t.Errorf("etc/app.conf mode = %o, want 0600 (original preserved)", hdr.Mode)
+			}
+		}
 	}
 }

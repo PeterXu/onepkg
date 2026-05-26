@@ -10,12 +10,13 @@ import (
 )
 
 type Config struct {
-	Name      string          `toml:"name"`
-	Version   string          `toml:"version"`
-	Platforms []string        `toml:"platforms"`
-	OutputDir string          `toml:"output_dir"`
-	Items     []string        `toml:"items"`
-	Services  []ServiceConfig `toml:"services"`
+	Name               string          `toml:"name"`
+	Version            string          `toml:"version"`
+	Platforms          []string        `toml:"platforms"`
+	OutputDir          string          `toml:"output_dir"`
+	PreservePermissions *bool          `toml:"preserve_permissions"` // nil = default true
+	Items              []string        `toml:"items"`
+	Services           []ServiceConfig `toml:"services"`
 }
 
 type ServiceConfig struct {
@@ -52,6 +53,10 @@ func ParseConfig(path string) (*Config, error) {
 func (c *Config) ApplyDefaults() {
 	if c.OutputDir == "" {
 		c.OutputDir = "packages"
+	}
+	if c.PreservePermissions == nil {
+		defaultTrue := true
+		c.PreservePermissions = &defaultTrue
 	}
 	// Platforms has no default - must be provided via --platform flag
 	for i := range c.Services {

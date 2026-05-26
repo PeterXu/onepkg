@@ -99,7 +99,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		tarData, err := BuildTarGZ(entries)
+		tarData, err := BuildTarGZ(entries, *cfg.PreservePermissions)
 		if err != nil {
 			fmt.Printf("Error building archive for %s: %v\n", platform, err)
 			os.Exit(1)
