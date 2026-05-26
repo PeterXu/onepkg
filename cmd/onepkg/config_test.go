@@ -833,3 +833,80 @@ exec = "bin/myapp"
 		t.Errorf("Linux.LimitNOFILE = %d, want 0", cfg.Services[0].Linux.LimitNOFILE)
 	}
 }
+
+func TestParseConfigWithDirs(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+
+	content := `
+name = "myapp"
+version = "v1.0.0"
+
+items = ["bin/myapp"]
+
+dirs = [
+  { path = "/var/log/myapp", owner = "myapp", mode = "0755" },
+  { path = "data", owner = "myapp", mode = "0750" },
+  { path = "/var/lib/myapp" },
+]
+`
+	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := ParseConfig(configPath)
+	if err != nil {
+		t.Fatalf("ParseConfig returned error: %v", err)
+	}
+
+	if len(cfg.Dirs) != 3 {
+		t.Fatalf("len(Dirs) = %d, want 3", len(cfg.Dirs))
+	}
+
+	// First dir - all fields
+	if cfg.Dirs[0].Path != "/var/log/myapp" {
+		t.Errorf("Dirs[0].Path = %q, want %q", cfg.Dirs[0].Path, "/var/log/myapp")
+	}
+	if cfg.Dirs[0].Owner != "myapp" {
+		t.Errorf("Dirs[0].Owner = %q, want %q", cfg.Dirs[0].Owner, "myapp")
+	}
+	if cfg.Dirs[0].Mode != "0755" {
+		t.Errorf("Dirs[0].Mode = %q, want %q", cfg.Dirs[0].Mode, "0755")
+	}
+
+	// Second dir - relative path
+	if cfg.Dirs[1].Path != "data" {
+		t.Errorf("Dirs[1].Path = %q, want %q", cfg.Dirs[1].Path, "data")
+	}
+
+	// Third dir - minimal
+	if cfg.Dirs[2].Path != "/var/lib/myapp" {
+		t.Errorf("Dirs[2].Path = %q, want %q", cfg.Dirs[2].Path, "/var/lib/myapp")
+	}
+	if cfg.Dirs[2].Owner != "" {
+		t.Errorf("Dirs[2].Owner = %q, want empty (default applied later)", cfg.Dirs[2].Owner)
+	}
+}
+
+func TestParseConfigDirsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+
+	content := `
+name = "myapp"
+version = "v1.0.0"
+items = ["bin/myapp"]
+`
+	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := ParseConfig(configPath)
+	if err != nil {
+		t.Fatalf("ParseConfig returned error: %v", err)
+	}
+
+	if len(cfg.Dirs) != 0 {
+		t.Errorf("len(Dirs) = %d, want 0 (no dirs field)", len(cfg.Dirs))
+	}
+}

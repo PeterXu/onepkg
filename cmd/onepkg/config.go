@@ -17,6 +17,7 @@ type Config struct {
 	PreservePermissions *bool          `toml:"preserve_permissions"` // nil = default true
 	Exclude            []string        `toml:"exclude"`              // patterns to exclude from package
 	Items              []string        `toml:"items"`
+	Dirs               []DirConfig     `toml:"dirs"`
 	Services           []ServiceConfig `toml:"services"`
 }
 
@@ -45,6 +46,13 @@ type MacOSService struct {
 	WorkingDir  string            `toml:"working_dir"`
 	Environment map[string]string `toml:"environment"`
 	LimitNOFILE int               `toml:"limit_nofile"`
+}
+
+type DirConfig struct {
+	Path  string `toml:"path"`  // Required
+	Owner string `toml:"owner"` // Optional, default: service user or root
+	Group string `toml:"group"` // Optional, default: same as owner
+	Mode  string `toml:"mode"`  // Optional, default: "0755"
 }
 
 func ParseConfig(path string) (*Config, error) {
