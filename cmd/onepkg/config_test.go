@@ -245,6 +245,33 @@ func TestValidate(t *testing.T) {
 			},
 			wantErr: "service exec \"bin/other\" not found in items",
 		},
+		{
+			name: "service name with slash",
+			cfg: &Config{
+				Name: "myapp", Version: "v1.0.0",
+				Items:    []string{"bin/myapp"},
+				Services: []ServiceConfig{{Name: "../evil", Exec: "bin/myapp"}},
+			},
+			wantErr: "service name",
+		},
+		{
+			name: "service name with space",
+			cfg: &Config{
+				Name: "myapp", Version: "v1.0.0",
+				Items:    []string{"bin/myapp"},
+				Services: []ServiceConfig{{Name: "my app", Exec: "bin/myapp"}},
+			},
+			wantErr: "service name",
+		},
+		{
+			name: "service name valid with hyphen",
+			cfg: &Config{
+				Name: "myapp", Version: "v1.0.0",
+				Items:    []string{"bin/myapp"},
+				Services: []ServiceConfig{{Name: "my-app", Exec: "bin/myapp"}},
+			},
+			wantErr: "",
+		},
 	}
 
 	for _, tt := range tests {

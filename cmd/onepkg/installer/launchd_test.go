@@ -23,7 +23,7 @@ func TestGenerateLaunchdPlist(t *testing.T) {
 		{`<dict>`},
 		{`<key>Label</key>`},
 		{`<string>com.autotest</string>`},
-		{`<key>ProgramArguments</key>`},
+		{`<key>Program</key>`},
 		{`<string>/opt/autotest/bin/test1</string>`},
 		{`<key>RunAtLoad</key>`},
 		{`<true/>`},

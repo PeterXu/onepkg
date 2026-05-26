@@ -26,10 +26,8 @@ func GenerateLaunchdPlist(cfg LaunchdConfig) string {
 	fmt.Fprintf(&b, "\t<key>Label</key>\n")
 	fmt.Fprintf(&b, "\t<string>com.%s</string>\n", cfg.Name)
 
-	fmt.Fprintf(&b, "\t<key>ProgramArguments</key>\n")
-	fmt.Fprintf(&b, "\t<array>\n")
-	fmt.Fprintf(&b, "\t\t<string>%s</string>\n", cfg.Exec)
-	fmt.Fprintf(&b, "\t</array>\n")
+	fmt.Fprintf(&b, "\t<key>Program</key>\n")
+	fmt.Fprintf(&b, "\t<string>%s</string>\n", cfg.Exec)
 
 	if cfg.RunAtLoad {
 		fmt.Fprintf(&b, "\t<key>RunAtLoad</key>\n")

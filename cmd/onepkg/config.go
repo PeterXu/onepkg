@@ -86,11 +86,12 @@ func (c *Config) Validate(configDir string) error {
 		return fmt.Errorf("at least one item is required")
 	}
 	for _, item := range c.Items {
-		if strings.Contains(item, "/..") || strings.HasPrefix(item, "..") {
-			return fmt.Errorf("path traversal not allowed in item %q", item)
-		}
 		if filepath.IsAbs(item) {
 			return fmt.Errorf("absolute path not allowed in item %q", item)
+		}
+		cleanRel, err := filepath.Rel(configDir, filepath.Join(configDir, item))
+		if err != nil || strings.HasPrefix(cleanRel, "..") {
+			return fmt.Errorf("path traversal not allowed in item %q", item)
 		}
 		fullPath := filepath.Join(configDir, item)
 		if _, err := os.Stat(fullPath); err != nil {
@@ -102,6 +103,9 @@ func (c *Config) Validate(configDir string) error {
 		itemSet[item] = true
 	}
 	for _, svc := range c.Services {
+		if svc.Name != "" && !isValidName(svc.Name) {
+			return fmt.Errorf("service name %q must contain only alphanumeric characters, hyphens, and underscores", svc.Name)
+		}
 		if svc.Exec != "" && !itemSet[svc.Exec] {
 			matched := false
 			for _, item := range c.Items {
@@ -116,4 +120,13 @@ func (c *Config) Validate(configDir string) error {
 		}
 	}
 	return nil
+}
+
+func isValidName(name string) bool {
+	for _, ch := range name {
+		if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '_') {
+			return false
+		}
+	}
+	return len(name) > 0
 }

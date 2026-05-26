@@ -188,12 +188,14 @@ cmd_list() {
     grep -A9999 '^\[sha\]' "$install_dir/VERSION" | while IFS= read -r line; do
         case "$line" in
             \"*\")
-                file=$(echo "$line" | sed 's/"\(.*\)" = .*/\1/')
-                sha=$(echo "$line" | sed 's/.*= "\(.*\)"/\1/')
+                temp="${line#\"}"
+                file="${temp%%\" *}"
+                temp="${line##*= \"}"
+                sha="${temp%\"}"
                 printf "  %-40s %s\n" "$file" "$sha"
                 ;;
         esac
-    done
+    done || true
 }
 
 cmd_verify() {
@@ -218,8 +220,10 @@ cmd_verify() {
     grep -A9999 '^\[sha\]' "$install_dir/VERSION" | while IFS= read -r line; do
         case "$line" in
             \"*\")
-                file=$(echo "$line" | sed 's/"\(.*\)" = .*/\1/')
-                expected=$(echo "$line" | sed 's/.*= "\(.*\)"/\1/')
+                temp="${line#\"}"
+                file="${temp%%\" *}"
+                temp="${line##*= \"}"
+                expected="${temp%\"}"
                 if [ ! -f "$install_dir/$file" ]; then
                     echo "MISSING: $file"
                     exit 1
