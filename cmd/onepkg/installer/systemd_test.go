@@ -129,3 +129,68 @@ func TestGenerateSystemdUnitWithoutWorkingDir(t *testing.T) {
 		t.Error("should not contain WorkingDirectory when not set")
 	}
 }
+
+func TestGenerateSystemdUnitWithEnvironment(t *testing.T) {
+	cfg := SystemdConfig{
+		Name:        "myapp",
+		Exec:        "/usr/local/myapp/bin/myapp",
+		Restart:     "on-failure",
+		User:        "root",
+		Environment: map[string]string{"LOG_LEVEL": "info", "PORT": "8080"},
+	}
+
+	output := GenerateSystemdUnit(cfg)
+
+	if !strings.Contains(output, `Environment="LOG_LEVEL=info"`) {
+		t.Errorf("output missing Environment LOG_LEVEL\nfull output:\n%s", output)
+	}
+	if !strings.Contains(output, `Environment="PORT=8080"`) {
+		t.Errorf("output missing Environment PORT\nfull output:\n%s", output)
+	}
+}
+
+func TestGenerateSystemdUnitWithoutEnvironment(t *testing.T) {
+	cfg := SystemdConfig{
+		Name:    "myapp",
+		Exec:    "/usr/local/myapp/bin/myapp",
+		Restart: "on-failure",
+		User:    "root",
+	}
+
+	output := GenerateSystemdUnit(cfg)
+
+	if strings.Contains(output, "Environment=") {
+		t.Error("should not contain Environment when not set")
+	}
+}
+
+func TestGenerateSystemdUnitWithLimitNOFILE(t *testing.T) {
+	cfg := SystemdConfig{
+		Name:        "myapp",
+		Exec:        "/usr/local/myapp/bin/myapp",
+		Restart:     "on-failure",
+		User:        "root",
+		LimitNOFILE: 65536,
+	}
+
+	output := GenerateSystemdUnit(cfg)
+
+	if !strings.Contains(output, "LimitNOFILE=65536") {
+		t.Errorf("output missing LimitNOFILE\nfull output:\n%s", output)
+	}
+}
+
+func TestGenerateSystemdUnitWithoutLimitNOFILE(t *testing.T) {
+	cfg := SystemdConfig{
+		Name:    "myapp",
+		Exec:    "/usr/local/myapp/bin/myapp",
+		Restart: "on-failure",
+		User:    "root",
+	}
+
+	output := GenerateSystemdUnit(cfg)
+
+	if strings.Contains(output, "LimitNOFILE") {
+		t.Error("should not contain LimitNOFILE when not set")
+	}
+}

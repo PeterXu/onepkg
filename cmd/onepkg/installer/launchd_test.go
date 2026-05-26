@@ -142,3 +142,82 @@ func TestGenerateLaunchdPlistWithoutWorkingDir(t *testing.T) {
 		t.Error("should not contain WorkingDirectory when not set")
 	}
 }
+
+func TestGenerateLaunchdPlistWithEnvironment(t *testing.T) {
+	cfg := LaunchdConfig{
+		Name:        "myapp",
+		Exec:        "/opt/myapp/bin/myapp",
+		User:        "root",
+		Environment: map[string]string{"LOG_LEVEL": "info", "PORT": "8080"},
+	}
+
+	output := GenerateLaunchdPlist(cfg)
+
+	if !strings.Contains(output, "<key>EnvironmentVariables</key>") {
+		t.Errorf("output missing EnvironmentVariables key\nfull output:\n%s", output)
+	}
+	if !strings.Contains(output, "<key>LOG_LEVEL</key>") {
+		t.Errorf("output missing LOG_LEVEL key\nfull output:\n%s", output)
+	}
+	if !strings.Contains(output, "<string>info</string>") {
+		t.Errorf("output missing LOG_LEVEL value\nfull output:\n%s", output)
+	}
+	if !strings.Contains(output, "<key>PORT</key>") {
+		t.Errorf("output missing PORT key\nfull output:\n%s", output)
+	}
+	if !strings.Contains(output, "<string>8080</string>") {
+		t.Errorf("output missing PORT value\nfull output:\n%s", output)
+	}
+}
+
+func TestGenerateLaunchdPlistWithoutEnvironment(t *testing.T) {
+	cfg := LaunchdConfig{
+		Name: "myapp",
+		Exec: "/opt/myapp/bin/myapp",
+		User: "root",
+	}
+
+	output := GenerateLaunchdPlist(cfg)
+
+	if strings.Contains(output, "EnvironmentVariables") {
+		t.Error("should not contain EnvironmentVariables when not set")
+	}
+}
+
+func TestGenerateLaunchdPlistWithLimitNOFILE(t *testing.T) {
+	cfg := LaunchdConfig{
+		Name:        "myapp",
+		Exec:        "/opt/myapp/bin/myapp",
+		User:        "root",
+		LimitNOFILE: 65536,
+	}
+
+	output := GenerateLaunchdPlist(cfg)
+
+	if !strings.Contains(output, "<key>SoftResourceLimits</key>") {
+		t.Errorf("output missing SoftResourceLimits\nfull output:\n%s", output)
+	}
+	if !strings.Contains(output, "<key>HardResourceLimits</key>") {
+		t.Errorf("output missing HardResourceLimits\nfull output:\n%s", output)
+	}
+	if !strings.Contains(output, "<key>NumberOfFiles</key>") {
+		t.Errorf("output missing NumberOfFiles key\nfull output:\n%s", output)
+	}
+	if !strings.Contains(output, "<integer>65536</integer>") {
+		t.Errorf("output missing NumberOfFiles value\nfull output:\n%s", output)
+	}
+}
+
+func TestGenerateLaunchdPlistWithoutLimitNOFILE(t *testing.T) {
+	cfg := LaunchdConfig{
+		Name: "myapp",
+		Exec: "/opt/myapp/bin/myapp",
+		User: "root",
+	}
+
+	output := GenerateLaunchdPlist(cfg)
+
+	if strings.Contains(output, "ResourceLimits") {
+		t.Error("should not contain ResourceLimits when not set")
+	}
+}

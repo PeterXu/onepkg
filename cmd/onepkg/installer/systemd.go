@@ -6,15 +6,17 @@ import (
 )
 
 type SystemdConfig struct {
-	Name       string
-	Exec       string
-	Args       []string
-	Restart    string
-	User       string
-	Type       string
-	After      []string
-	RestartSec int
-	WorkingDir string
+	Name        string
+	Exec        string
+	Args        []string
+	Restart     string
+	User        string
+	Type        string
+	After       []string
+	RestartSec  int
+	WorkingDir  string
+	Environment map[string]string
+	LimitNOFILE int
 }
 
 func GenerateSystemdUnit(cfg SystemdConfig) string {
@@ -44,6 +46,12 @@ func GenerateSystemdUnit(cfg SystemdConfig) string {
 	fmt.Fprintf(&b, "User=%s\n", cfg.User)
 	if cfg.WorkingDir != "" {
 		fmt.Fprintf(&b, "WorkingDirectory=%s\n", cfg.WorkingDir)
+	}
+	for key, value := range cfg.Environment {
+		fmt.Fprintf(&b, `Environment="%s=%s"`+"\n", key, value)
+	}
+	if cfg.LimitNOFILE > 0 {
+		fmt.Fprintf(&b, "LimitNOFILE=%d\n", cfg.LimitNOFILE)
 	}
 	b.WriteString("\n")
 

@@ -708,3 +708,128 @@ items = ["bin/myapp"]
 		t.Errorf("len(Exclude) = %d, want 0 (no exclude field)", len(cfg.Exclude))
 	}
 }
+
+func TestParseConfigWithEnvironment(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+
+	content := `
+name = "myapp"
+version = "v1.0.0"
+
+items = ["bin/myapp"]
+
+[[services]]
+name = "myapp"
+exec = "bin/myapp"
+
+[services.linux]
+environment = { LOG_LEVEL = "info", PORT = "8080" }
+
+[services.macos]
+environment = { LOG_LEVEL = "debug" }
+`
+	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := ParseConfig(configPath)
+	if err != nil {
+		t.Fatalf("ParseConfig returned error: %v", err)
+	}
+
+	if len(cfg.Services) != 1 {
+		t.Fatalf("len(Services) = %d, want 1", len(cfg.Services))
+	}
+	svc := cfg.Services[0]
+
+	if len(svc.Linux.Environment) != 2 {
+		t.Errorf("len(Linux.Environment) = %d, want 2", len(svc.Linux.Environment))
+	}
+	if svc.Linux.Environment["LOG_LEVEL"] != "info" {
+		t.Errorf("Linux.Environment[LOG_LEVEL] = %q, want %q", svc.Linux.Environment["LOG_LEVEL"], "info")
+	}
+	if svc.Linux.Environment["PORT"] != "8080" {
+		t.Errorf("Linux.Environment[PORT] = %q, want %q", svc.Linux.Environment["PORT"], "8080")
+	}
+
+	if len(svc.MacOS.Environment) != 1 {
+		t.Errorf("len(MacOS.Environment) = %d, want 1", len(svc.MacOS.Environment))
+	}
+	if svc.MacOS.Environment["LOG_LEVEL"] != "debug" {
+		t.Errorf("MacOS.Environment[LOG_LEVEL] = %q, want %q", svc.MacOS.Environment["LOG_LEVEL"], "debug")
+	}
+}
+
+func TestParseConfigWithLimitNOFILE(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+
+	content := `
+name = "myapp"
+version = "v1.0.0"
+
+items = ["bin/myapp"]
+
+[[services]]
+name = "myapp"
+exec = "bin/myapp"
+
+[services.linux]
+limit_nofile = 65536
+
+[services.macos]
+limit_nofile = 10240
+`
+	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := ParseConfig(configPath)
+	if err != nil {
+		t.Fatalf("ParseConfig returned error: %v", err)
+	}
+
+	if len(cfg.Services) != 1 {
+		t.Fatalf("len(Services) = %d, want 1", len(cfg.Services))
+	}
+	svc := cfg.Services[0]
+
+	if svc.Linux.LimitNOFILE != 65536 {
+		t.Errorf("Linux.LimitNOFILE = %d, want 65536", svc.Linux.LimitNOFILE)
+	}
+	if svc.MacOS.LimitNOFILE != 10240 {
+		t.Errorf("MacOS.LimitNOFILE = %d, want 10240", svc.MacOS.LimitNOFILE)
+	}
+}
+
+func TestParseConfigEnvironmentEmpty(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+
+	// No environment field
+	content := `
+name = "myapp"
+version = "v1.0.0"
+items = ["bin/myapp"]
+
+[[services]]
+name = "myapp"
+exec = "bin/myapp"
+`
+	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := ParseConfig(configPath)
+	if err != nil {
+		t.Fatalf("ParseConfig returned error: %v", err)
+	}
+
+	if len(cfg.Services[0].Linux.Environment) != 0 {
+		t.Errorf("len(Linux.Environment) = %d, want 0", len(cfg.Services[0].Linux.Environment))
+	}
+	if cfg.Services[0].Linux.LimitNOFILE != 0 {
+		t.Errorf("Linux.LimitNOFILE = %d, want 0", cfg.Services[0].Linux.LimitNOFILE)
+	}
+}

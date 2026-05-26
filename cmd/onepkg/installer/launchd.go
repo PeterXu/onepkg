@@ -6,13 +6,15 @@ import (
 )
 
 type LaunchdConfig struct {
-	Name       string
-	Exec       string
-	Args       []string
-	User       string
-	RunAtLoad  bool
-	KeepAlive  bool
-	WorkingDir string
+	Name        string
+	Exec        string
+	Args        []string
+	User        string
+	RunAtLoad   bool
+	KeepAlive   bool
+	WorkingDir  string
+	Environment map[string]string
+	LimitNOFILE int
 }
 
 func GenerateLaunchdPlist(cfg LaunchdConfig) string {
@@ -58,6 +60,29 @@ func GenerateLaunchdPlist(cfg LaunchdConfig) string {
 	if cfg.WorkingDir != "" {
 		fmt.Fprintf(&b, "\t<key>WorkingDirectory</key>\n")
 		fmt.Fprintf(&b, "\t<string>%s</string>\n", cfg.WorkingDir)
+	}
+
+	if len(cfg.Environment) > 0 {
+		fmt.Fprintf(&b, "\t<key>EnvironmentVariables</key>\n")
+		fmt.Fprintf(&b, "\t<dict>\n")
+		for key, value := range cfg.Environment {
+			fmt.Fprintf(&b, "\t\t<key>%s</key>\n", key)
+			fmt.Fprintf(&b, "\t\t<string>%s</string>\n", value)
+		}
+		fmt.Fprintf(&b, "\t</dict>\n")
+	}
+
+	if cfg.LimitNOFILE > 0 {
+		fmt.Fprintf(&b, "\t<key>SoftResourceLimits</key>\n")
+		fmt.Fprintf(&b, "\t<dict>\n")
+		fmt.Fprintf(&b, "\t\t<key>NumberOfFiles</key>\n")
+		fmt.Fprintf(&b, "\t\t<integer>%d</integer>\n", cfg.LimitNOFILE)
+		fmt.Fprintf(&b, "\t</dict>\n")
+		fmt.Fprintf(&b, "\t<key>HardResourceLimits</key>\n")
+		fmt.Fprintf(&b, "\t<dict>\n")
+		fmt.Fprintf(&b, "\t\t<key>NumberOfFiles</key>\n")
+		fmt.Fprintf(&b, "\t\t<integer>%d</integer>\n", cfg.LimitNOFILE)
+		fmt.Fprintf(&b, "\t</dict>\n")
 	}
 
 	b.WriteString("</dict>\n")

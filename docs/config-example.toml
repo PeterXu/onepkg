@@ -62,6 +62,10 @@ working_dir = "/var/lib/myapp"  # working directory for the service (optional)
                               # Default: install directory (e.g., /usr/local/myapp)
                               # Relative paths are prepended with install dir (e.g., "data" -> /usr/local/myapp/data)
                               # Absolute paths override the default (e.g., "/var/lib/myapp")
+environment = { LOG_LEVEL = "info", PORT = "8080" }  # environment variables (optional)
+                              # Format: key = "value" pairs
+limit_nofile = 65536          # file descriptor limit (optional)
+                              # Sets both soft and hard limits
 
 # macOS-specific (launchd) settings
 [services.macos]
@@ -71,6 +75,10 @@ working_dir = "/opt/myapp/data"  # working directory for the service (optional)
                               # Default: install directory (e.g., /opt/myapp)
                               # Relative paths are prepended with install dir (e.g., "data" -> /opt/myapp/data)
                               # Absolute paths override the default (e.g., "/opt/myapp/data")
+environment = { LOG_LEVEL = "debug" }  # environment variables (optional)
+                              # Format: key = "value" pairs
+limit_nofile = 10240          # file descriptor limit (optional)
+                              # Sets both soft and hard resource limits
 
 # Example: second service (post-MVP - not yet supported by installer)
 # [[services]]

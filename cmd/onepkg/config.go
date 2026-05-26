@@ -31,16 +31,20 @@ type ServiceConfig struct {
 }
 
 type LinuxService struct {
-	Type       string   `toml:"type"`
-	After      []string `toml:"after"`
-	RestartSec int      `toml:"restart_sec"`
-	WorkingDir string   `toml:"working_dir"`
+	Type        string            `toml:"type"`
+	After       []string          `toml:"after"`
+	RestartSec  int               `toml:"restart_sec"`
+	WorkingDir  string            `toml:"working_dir"`
+	Environment map[string]string `toml:"environment"`
+	LimitNOFILE int               `toml:"limit_nofile"`
 }
 
 type MacOSService struct {
-	RunAtLoad  bool   `toml:"run_at_load"`
-	KeepAlive  bool   `toml:"keep_alive"`
-	WorkingDir string `toml:"working_dir"`
+	RunAtLoad   bool              `toml:"run_at_load"`
+	KeepAlive   bool              `toml:"keep_alive"`
+	WorkingDir  string            `toml:"working_dir"`
+	Environment map[string]string `toml:"environment"`
+	LimitNOFILE int               `toml:"limit_nofile"`
 }
 
 func ParseConfig(path string) (*Config, error) {

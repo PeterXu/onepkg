@@ -159,15 +159,17 @@ func BuildForPlatform(cfg *Config, platform string, entries []FileEntry, tarData
 				workingDir = filepath.Join(defaultDir, workingDir)
 			}
 			serviceContent = installer.GenerateSystemdUnit(installer.SystemdConfig{
-				Name:       svc.Name,
-				Exec:       filepath.Join(defaultDir, svc.Exec),
-				Args:       svc.Args,
-				Restart:    svc.Restart,
-				User:       svc.User,
-				Type:       svc.Linux.Type,
-				After:      svc.Linux.After,
-				RestartSec: svc.Linux.RestartSec,
-				WorkingDir: workingDir,
+				Name:        svc.Name,
+				Exec:        filepath.Join(defaultDir, svc.Exec),
+				Args:        svc.Args,
+				Restart:     svc.Restart,
+				User:        svc.User,
+				Type:        svc.Linux.Type,
+				After:       svc.Linux.After,
+				RestartSec:  svc.Linux.RestartSec,
+				WorkingDir:  workingDir,
+				Environment: svc.Linux.Environment,
+				LimitNOFILE: svc.Linux.LimitNOFILE,
 			})
 		}
 	case "darwin":
@@ -183,13 +185,15 @@ func BuildForPlatform(cfg *Config, platform string, entries []FileEntry, tarData
 				workingDir = filepath.Join(defaultDir, workingDir)
 			}
 			serviceContent = installer.GenerateLaunchdPlist(installer.LaunchdConfig{
-				Name:      svc.Name,
-				Exec:      filepath.Join(defaultDir, svc.Exec),
-				Args:      svc.Args,
-				User:      svc.User,
-				RunAtLoad: svc.MacOS.RunAtLoad,
-				KeepAlive: svc.MacOS.KeepAlive,
-				WorkingDir: workingDir,
+				Name:        svc.Name,
+				Exec:        filepath.Join(defaultDir, svc.Exec),
+				Args:        svc.Args,
+				User:        svc.User,
+				RunAtLoad:   svc.MacOS.RunAtLoad,
+				KeepAlive:   svc.MacOS.KeepAlive,
+				WorkingDir:  workingDir,
+				Environment: svc.MacOS.Environment,
+				LimitNOFILE: svc.MacOS.LimitNOFILE,
 			})
 		}
 	default:
