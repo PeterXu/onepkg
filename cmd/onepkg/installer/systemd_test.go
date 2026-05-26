@@ -98,3 +98,34 @@ func TestGenerateSystemdUnitEmptyArgs(t *testing.T) {
 		t.Errorf("output should have ExecStart without args\nfull output:\n%s", output)
 	}
 }
+
+func TestGenerateSystemdUnitWithWorkingDir(t *testing.T) {
+	cfg := SystemdConfig{
+		Name:       "myapp",
+		Exec:       "/usr/local/myapp/bin/myapp",
+		Restart:    "on-failure",
+		User:       "root",
+		WorkingDir: "/var/lib/myapp",
+	}
+
+	output := GenerateSystemdUnit(cfg)
+
+	if !strings.Contains(output, "WorkingDirectory=/var/lib/myapp") {
+		t.Errorf("output missing WorkingDirectory\nfull output:\n%s", output)
+	}
+}
+
+func TestGenerateSystemdUnitWithoutWorkingDir(t *testing.T) {
+	cfg := SystemdConfig{
+		Name:    "myapp",
+		Exec:    "/usr/local/myapp/bin/myapp",
+		Restart: "on-failure",
+		User:    "root",
+	}
+
+	output := GenerateSystemdUnit(cfg)
+
+	if strings.Contains(output, "WorkingDirectory") {
+		t.Error("should not contain WorkingDirectory when not set")
+	}
+}

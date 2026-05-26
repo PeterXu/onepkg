@@ -14,6 +14,7 @@ type SystemdConfig struct {
 	Type       string
 	After      []string
 	RestartSec int
+	WorkingDir string
 }
 
 func GenerateSystemdUnit(cfg SystemdConfig) string {
@@ -41,6 +42,9 @@ func GenerateSystemdUnit(cfg SystemdConfig) string {
 		fmt.Fprintf(&b, "RestartSec=%d\n", cfg.RestartSec)
 	}
 	fmt.Fprintf(&b, "User=%s\n", cfg.User)
+	if cfg.WorkingDir != "" {
+		fmt.Fprintf(&b, "WorkingDirectory=%s\n", cfg.WorkingDir)
+	}
 	b.WriteString("\n")
 
 	b.WriteString("[Install]\n")
