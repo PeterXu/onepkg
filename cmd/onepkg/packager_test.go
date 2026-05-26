@@ -1,6 +1,10 @@
 package main
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -130,5 +134,64 @@ func TestCollectFilesPreservesPermissions(t *testing.T) {
 				t.Errorf("bin/data mode = %o, expected no execute bit", e.Mode)
 			}
 		}
+	}
+}
+
+func TestBuildTarGZ(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "bin"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "etc"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "bin", "app"), []byte("hello"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "etc", "app.conf"), []byte("key=val"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := CollectFiles(dir, []string{"bin/app", "etc/app.conf"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tarData, err := BuildTarGZ(entries)
+	if err != nil {
+		t.Fatalf("BuildTarGZ returned error: %v", err)
+	}
+
+	gzReader, err := gzip.NewReader(bytes.NewReader(tarData))
+	if err != nil {
+		t.Fatalf("gzip reader error: %v", err)
+	}
+	defer gzReader.Close()
+
+	tarReader := tar.NewReader(gzReader)
+
+	found := map[string]bool{}
+	for {
+		hdr, err := tarReader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("tar read error: %v", err)
+		}
+		found[hdr.Name] = true
+
+		if hdr.Name == "bin/app" {
+			if hdr.Mode&0111 == 0 {
+				t.Errorf("bin/app mode in tar = %o, expected execute bit", hdr.Mode)
+			}
+		}
+	}
+
+	if !found["bin/app"] {
+		t.Error("tar missing bin/app")
+	}
+	if !found["etc/app.conf"] {
+		t.Error("tar missing etc/app.conf")
 	}
 }

@@ -1,6 +1,9 @@
 package main
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
@@ -80,4 +83,38 @@ func makeFileEntry(configDir, relPath string) (FileEntry, error) {
 		Mode:    info.Mode(),
 		Size:    info.Size(),
 	}, nil
+}
+
+func BuildTarGZ(entries []FileEntry) ([]byte, error) {
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+
+	for _, entry := range entries {
+		data, err := os.ReadFile(entry.AbsPath)
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", entry.RelPath, err)
+		}
+
+		hdr := &tar.Header{
+			Name: entry.RelPath,
+			Mode: int64(entry.Mode),
+			Size: entry.Size,
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			return nil, fmt.Errorf("tar header %s: %w", entry.RelPath, err)
+		}
+		if _, err := tw.Write(data); err != nil {
+			return nil, fmt.Errorf("tar write %s: %w", entry.RelPath, err)
+		}
+	}
+
+	if err := tw.Close(); err != nil {
+		return nil, fmt.Errorf("close tar: %w", err)
+	}
+	if err := gw.Close(); err != nil {
+		return nil, fmt.Errorf("close gzip: %w", err)
+	}
+
+	return buf.Bytes(), nil
 }
