@@ -292,3 +292,72 @@ func TestValidate(t *testing.T) {
 		})
 	}
 }
+
+func TestHasPlatformMarker(t *testing.T) {
+	tests := []struct {
+		item     string
+		expected bool
+	}{
+		{"bin/myapp.{platform}", true},
+		{"bin/helper.{platform}", true},
+		{"bin/myapp", false},
+		{"etc/config.conf", false},
+		{"data/", false},
+		{"lib/plugin.{platform}.so", true},
+		{"bin/myapp.linux-arm64", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.item, func(t *testing.T) {
+			result := HasPlatformMarker(tt.item)
+			if result != tt.expected {
+				t.Errorf("HasPlatformMarker(%q) = %v, want %v", tt.item, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestResolvePlatformItem(t *testing.T) {
+	tests := []struct {
+		item     string
+		platform string
+		expected string
+	}{
+		{"bin/myapp.{platform}", "linux-arm64", "bin/myapp.linux-arm64"},
+		{"bin/helper.{platform}", "darwin-arm64", "bin/helper.darwin-arm64"},
+		{"lib/plugin.{platform}.so", "linux-amd64", "lib/plugin.linux-amd64.so"},
+		{"bin/myapp", "linux-arm64", "bin/myapp"},
+		{"etc/config.conf", "darwin-arm64", "etc/config.conf"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.item+"_"+tt.platform, func(t *testing.T) {
+			result := ResolvePlatformItem(tt.item, tt.platform)
+			if result != tt.expected {
+				t.Errorf("ResolvePlatformItem(%q, %q) = %q, want %q", tt.item, tt.platform, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestStripPlatformMarker(t *testing.T) {
+	tests := []struct {
+		item     string
+		expected string
+	}{
+		{"bin/myapp.{platform}", "bin/myapp"},
+		{"bin/helper.{platform}", "bin/helper"},
+		{"lib/plugin.{platform}.so", "lib/plugin.so"},
+		{"bin/myapp", "bin/myapp"},
+		{"etc/config.conf", "etc/config.conf"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.item, func(t *testing.T) {
+			result := StripPlatformMarker(tt.item)
+			if result != tt.expected {
+				t.Errorf("StripPlatformMarker(%q) = %q, want %q", tt.item, result, tt.expected)
+			}
+		})
+	}
+}

@@ -127,3 +127,20 @@ func isValidName(name string) bool {
 	}
 	return len(name) > 0
 }
+
+const PlatformMarker = "{platform}"
+
+// HasPlatformMarker returns true if the item contains {platform} placeholder
+func HasPlatformMarker(item string) bool {
+	return strings.Contains(item, PlatformMarker)
+}
+
+// ResolvePlatformItem replaces {platform} with the actual platform string
+func ResolvePlatformItem(item, platform string) string {
+	return strings.ReplaceAll(item, PlatformMarker, platform)
+}
+
+// StripPlatformMarker removes .{platform} from the item path
+func StripPlatformMarker(item string) string {
+	return strings.ReplaceAll(item, "."+PlatformMarker, "")
+}
