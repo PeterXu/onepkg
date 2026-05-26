@@ -18,7 +18,7 @@ func main() {
 	}
 
 	var configPath string
-	var platformOverride string
+	var platformInput string
 	var outputOverride string
 
 	for i := 1; i < len(os.Args); i++ {
@@ -30,7 +30,7 @@ func main() {
 			}
 		case "--platform":
 			if i+1 < len(os.Args) {
-				platformOverride = os.Args[i+1]
+				platformInput = os.Args[i+1]
 				i++
 			}
 		case "--output":
@@ -49,6 +49,19 @@ func main() {
 		os.Exit(1)
 	}
 
+	if platformInput == "" {
+		fmt.Println("Error: --platform <platforms> is required")
+		fmt.Println("Example: --platform linux-arm64")
+		fmt.Println("         --platform linux-arm64,linux-amd64")
+		os.Exit(1)
+	}
+
+	platforms, err := ParsePlatforms(platformInput)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		os.Exit(1)
+	}
+
 	cfg, err := ParseConfig(configPath)
 	if err != nil {
 		fmt.Printf("Error parsing config: %v\n", err)
@@ -57,9 +70,6 @@ func main() {
 
 	cfg.ApplyDefaults()
 
-	if platformOverride != "" {
-		cfg.Platforms = strings.Split(platformOverride, ",")
-	}
 	if outputOverride != "" {
 		cfg.OutputDir = outputOverride
 	}
@@ -70,30 +80,36 @@ func main() {
 		os.Exit(1)
 	}
 
-	entries, err := CollectFiles(configDir, cfg.Items)
-	if err != nil {
-		fmt.Printf("Error collecting files: %v\n", err)
-		os.Exit(1)
-	}
-
-	tarData, err := BuildTarGZ(entries)
-	if err != nil {
-		fmt.Printf("Error building archive: %v\n", err)
-		os.Exit(1)
-	}
-
-	shaMap := make(map[string]string)
-	for _, e := range entries {
-		shaMap[e.RelPath] = e.SHA1
-	}
-
 	outputDir := filepath.Join(configDir, cfg.OutputDir)
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		fmt.Printf("Error creating output dir: %v\n", err)
 		os.Exit(1)
 	}
 
-	for _, platform := range cfg.Platforms {
+	for _, platform := range platforms {
+		resolved, err := ResolveItems(configDir, cfg.Items, platform)
+		if err != nil {
+			fmt.Printf("Error resolving items for %s: %v\n", platform, err)
+			os.Exit(1)
+		}
+
+		entries, err := CollectFilesResolved(configDir, resolved)
+		if err != nil {
+			fmt.Printf("Error collecting files for %s: %v\n", platform, err)
+			os.Exit(1)
+		}
+
+		tarData, err := BuildTarGZ(entries)
+		if err != nil {
+			fmt.Printf("Error building archive for %s: %v\n", platform, err)
+			os.Exit(1)
+		}
+
+		shaMap := make(map[string]string)
+		for _, e := range entries {
+			shaMap[e.RelPath] = e.SHA1
+		}
+
 		if err := BuildForPlatform(cfg, platform, entries, tarData, shaMap, outputDir); err != nil {
 			fmt.Printf("Error building %s: %v\n", platform, err)
 			os.Exit(1)
@@ -101,7 +117,7 @@ func main() {
 		fmt.Printf("Created: %s\n", platformOutputPath(cfg, platform, outputDir))
 	}
 
-	fmt.Printf("\nBuilt %d platform(s)\n", len(cfg.Platforms))
+	fmt.Printf("\nBuilt %d platform(s)\n", len(platforms))
 }
 
 func BuildForPlatform(cfg *Config, platform string, entries []FileEntry, tarData []byte, shaMap map[string]string, outputDir string) error {
@@ -204,16 +220,28 @@ func printHelp() {
 	fmt.Println(`onepkg - General-purpose self-extracting installer generator
 
 Usage:
-  onepkg -c config.toml [options]
+  onepkg -c config.toml --platform <platforms> [options]
 
 Options:
   -c, --config <path>      Path to config.toml (required)
-      --platform <p>       Build for specific platform (e.g., linux-arm64)
+      --platform <p>       Target platforms, comma-separated (required)
+                           e.g., --platform linux-arm64
+                           e.g., --platform linux-arm64,linux-amd64
       --output <dir>       Override output directory
   -h, --help               Show this help
 
+Supported platforms:
+  linux-amd64, linux-arm64
+  darwin-amd64, darwin-arm64
+
+Item syntax:
+  Items can use {platform} marker for platform-specific files:
+    "bin/myapp.{platform}"  -> resolves to bin/myapp.linux-arm64, packed as bin/myapp
+  Literal items are unchanged:
+    "etc/config.conf"       -> packed as etc/config.conf
+
 Examples:
-  onepkg -c config.toml
   onepkg -c config.toml --platform linux-arm64
-  onepkg -c config.toml --output ./dist`)
+  onepkg -c config.toml --platform linux-arm64,linux-amd64
+  onepkg -c config.toml --platform darwin-arm64 --output ./dist`)
 }
