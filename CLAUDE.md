@@ -38,9 +38,9 @@ cd cmd/onepkg && go test ./... -v
 cd cmd/onepkg && go test -run TestParseConfig -v
 cd cmd/onepkg && go test ./installer/ -v
 
-# Run
-cd cmd/onepkg && go run . -c config.toml
-cd cmd/onepkg && go run . -c config.toml --platform linux-arm64 --output ./dist
+# Run (platform required)
+cd cmd/onepkg && go run . -c config.toml --platform linux-arm64
+cd cmd/onepkg && go run . -c config.toml --platform linux-arm64,linux-amd64,darwin-arm64 --output ./dist
 ```
 
 ## Tech Stack
@@ -57,6 +57,8 @@ cd cmd/onepkg && go run . -c config.toml --platform linux-arm64 --output ./dist
 - **Platform naming**: `{os}-{arch}` (e.g. `linux-arm64`), filenames use underscores: `{name}_{version}_{os}_{arch}.sh`
 - **Default install paths**: Linux `/usr/local/{name}`, macOS `/opt/{name}`
 - **Arch mapping**: Linux arm64 → `aarch64` (`uname -m`), macOS arm64 → `arm64`
+- **Platform resolution**: Items use `{platform}` marker (e.g., `bin/myapp.{platform}`) which resolves to platform-specific file (e.g., `bin/myapp.linux-arm64`) and packs with stripped path (`bin/myapp`). Missing platform files fail fast—no fallback.
+- **Required CLI flag**: `--platform` is required. Comma-separated for multi-platform builds (e.g., `--platform linux-arm64,linux-amd64`).
 
 ## Rules
 

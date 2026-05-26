@@ -9,25 +9,26 @@ A self-extracting installer generator for arbitrary software packages.
 name = "autotest"
 version = "v1.0.0"
 
-# Build options
-platforms = ["linux-arm64", "linux-amd64", "darwin-arm64"]  # or "all"
+# Build options (platforms via CLI flag, not config)
 output_dir = "packages"
 preserve_permissions = true
 exclude = ["tests/", "*.md", ".git*"]
 
 # Files to package (relative to config.toml location)
+# Use {platform} marker for platform-specific binaries:
+#   "bin/myapp.{platform}" resolves to "bin/myapp.linux-arm64" for linux-arm64
+#   and packs as "bin/myapp" (stripped) in the final package
 items = [
-  "bin/test1",
-  "bin/test2",
-  "etc/gate.conf",
-  "data/",
-  "res/",
+  "bin/test1.{platform}",    # platform-specific binary
+  "bin/test2.{platform}",    # another platform-specific binary
+  "etc/gate.conf",           # same for all platforms
+  "data/",                   # directory (recursive)
 ]
 
 # Services (optional, omit for no service)
 [[services]]
 name = "main"                    # default: package name
-exec = "bin/test1"               # default: first bin/* item
+exec = "bin/test1"               # stripped path (no {platform} marker)
 restart = "on-failure"           # no | on-failure | always
 user = "autotest"                # default: root
 
@@ -162,39 +163,36 @@ Examples:
 
 ## Validation (before packaging)
 
-- All `items` paths exist
+- All `items` paths exist (literal paths checked, `{platform}` items checked at build time)
 - No path traversal (`../`, absolute paths starting with `/`)
-- Service `exec` references existing item
-- Platform binaries exist (if applicable)
+- Service `exec` references existing item (use stripped path, no `{platform}` marker in exec)
+- Platform-specific files exist for each requested platform (fail fast, no fallback)
 - `name` doesn't conflict with reserved names
 
 ## Default Values
 
 | Field | Default |
 |-------|---------|
-| `platforms` | Current build platform only |
+| `platforms` | Required via CLI (`--platform` flag) |
 | `output_dir` | `packages` |
 | `preserve_permissions` | `true` |
 | `exclude` | `[]` (none) |
 | `services.name` | Package `name` |
-| `services.exec` | First `bin/*` item |
+| `services.exec` | First `bin/*` item (stripped) |
 | `services.restart` | `on-failure` |
 | `services.user` | `root` |
 
 ## CLI Usage
 
 ```bash
-# Build package for all platforms
-general-package -c config.toml
+# Build package for specific platform (required)
+onepkg -c config.toml --platform linux-arm64
 
-# Build for specific platform
-general-package -c config.toml --platform linux-arm64
-
-# Build for multiple platforms
-general-package -c config.toml --platforms linux-arm64,darwin-arm64
+# Build for multiple platforms (comma-separated)
+onepkg -c config.toml --platform linux-arm64,linux-amd64,darwin-arm64
 
 # Specify output directory
-general-package -c config.toml --output ./dist
+onepkg -c config.toml --platform linux-arm64 --output ./dist
 ```
 
 ## Implementation Location

@@ -6,14 +6,8 @@ name = "myapp"
 # Required: semantic version
 version = "v1.2.0"
 
-# Optional: target platforms (defaults to current OS-ARCH if omitted)
-# Format: "{os}-{arch}"
-platforms = [
-  "linux-amd64",
-  "linux-arm64",
-  "darwin-amd64",
-  "darwin-arm64",
-]
+# NOTE: Platforms are NOT configured here. Use --platform CLI flag (required).
+# Example: onepkg -c config.toml --platform linux-arm64,linux-amd64,darwin-arm64
 
 # Optional: output directory for generated installers (default: "packages")
 output_dir = "dist"
@@ -21,18 +15,22 @@ output_dir = "dist"
 # Required: files and directories to include in the package
 # Paths are relative to the directory containing this config.toml.
 # Directories are included recursively.
+#
+# Platform-specific files: Use {platform} marker for binaries that vary by platform.
+# The marker resolves to the actual platform string (e.g., linux-arm64).
+# Example: "bin/myapp.{platform}" resolves to "bin/myapp.linux-arm64" for linux-arm64,
+# and packs as "bin/myapp" (marker stripped) in the final package.
 items = [
-  "bin/myapp",          # binary
-  "bin/helper",         # additional binary
-  "etc/myapp.conf",     # config file
-  "data/",              # directory (recursive)
-  "res/",               # another directory
+  "bin/myapp.{platform}",  # platform-specific binary (required for each --platform)
+  "bin/helper.{platform}", # another platform-specific binary
+  "etc/myapp.conf",        # config file (same for all platforms)
+  "data/",                 # directory (recursive, same for all platforms)
 ]
 
 # Optional: service definitions (only the first entry is used in MVP)
 [[services]]
 name = "myapp"                # service name (defaults to package name)
-exec = "bin/myapp"            # executable (must appear in items)
+exec = "bin/myapp"            # executable path (stripped, no {platform} marker)
 restart = "on-failure"        # restart policy (default: "on-failure")
 user = "myapp"                # run-as user (default: "root")
 
