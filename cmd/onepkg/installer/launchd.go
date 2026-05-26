@@ -6,12 +6,13 @@ import (
 )
 
 type LaunchdConfig struct {
-	Name      string
-	Exec      string
-	Args      []string
-	User      string
-	RunAtLoad bool
-	KeepAlive bool
+	Name       string
+	Exec       string
+	Args       []string
+	User       string
+	RunAtLoad  bool
+	KeepAlive  bool
+	WorkingDir string
 }
 
 func GenerateLaunchdPlist(cfg LaunchdConfig) string {
@@ -53,6 +54,11 @@ func GenerateLaunchdPlist(cfg LaunchdConfig) string {
 
 	fmt.Fprintf(&b, "\t<key>UserName</key>\n")
 	fmt.Fprintf(&b, "\t<string>%s</string>\n", cfg.User)
+
+	if cfg.WorkingDir != "" {
+		fmt.Fprintf(&b, "\t<key>WorkingDirectory</key>\n")
+		fmt.Fprintf(&b, "\t<string>%s</string>\n", cfg.WorkingDir)
+	}
 
 	b.WriteString("</dict>\n")
 	b.WriteString("</plist>\n")

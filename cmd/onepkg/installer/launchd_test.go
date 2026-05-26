@@ -110,3 +110,35 @@ func TestGenerateLaunchdPlistEmptyArgs(t *testing.T) {
 		t.Error("empty args should not use ProgramArguments")
 	}
 }
+
+func TestGenerateLaunchdPlistWithWorkingDir(t *testing.T) {
+	cfg := LaunchdConfig{
+		Name:       "myapp",
+		Exec:       "/opt/myapp/bin/myapp",
+		User:       "root",
+		WorkingDir: "/opt/myapp/data",
+	}
+
+	output := GenerateLaunchdPlist(cfg)
+
+	if !strings.Contains(output, "<key>WorkingDirectory</key>") {
+		t.Errorf("output missing WorkingDirectory key\nfull output:\n%s", output)
+	}
+	if !strings.Contains(output, "<string>/opt/myapp/data</string>") {
+		t.Errorf("output missing WorkingDirectory value\nfull output:\n%s", output)
+	}
+}
+
+func TestGenerateLaunchdPlistWithoutWorkingDir(t *testing.T) {
+	cfg := LaunchdConfig{
+		Name: "myapp",
+		Exec: "/opt/myapp/bin/myapp",
+		User: "root",
+	}
+
+	output := GenerateLaunchdPlist(cfg)
+
+	if strings.Contains(output, "WorkingDirectory") {
+		t.Error("should not contain WorkingDirectory when not set")
+	}
+}
