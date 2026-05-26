@@ -12,6 +12,18 @@ version = "v1.2.0"
 # Optional: output directory for generated installers (default: "packages")
 output_dir = "dist"
 
+# Optional: preserve file permissions in package (default: true)
+# When false: normalize permissions - 0755 for executables, 0644 for others
+preserve_permissions = true
+
+# Optional: exclude patterns for filtering files from package (default: none)
+# Pattern types:
+#   - "tests/"     → exclude directory and all contents (prefix match)
+#   - "*.md"       → exclude files matching glob at ROOT level only
+#   - ".git*"      → exclude files/dirs matching prefix glob
+#   - "docs/*.md"  → path-aware glob in subdirectory
+exclude = ["tests/", "*.md", ".git*"]
+
 # Required: files and directories to include in the package
 # Paths are relative to the directory containing this config.toml.
 # Directories are included recursively.
