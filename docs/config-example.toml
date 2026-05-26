@@ -27,20 +27,39 @@ items = [
   "data/",                 # directory (recursive, same for all platforms)
 ]
 
-# Optional: service definitions (only the first entry is used in MVP)
+# Optional: service definitions (MVP: only the first [[services]] entry is used)
+# Multiple services are supported in config but post-MVP for installer generation.
 [[services]]
 name = "myapp"                # service name (defaults to package name)
 exec = "bin/myapp"            # executable path (stripped, no {platform} marker)
-restart = "on-failure"        # restart policy (default: "on-failure")
+args = ["--config", "etc/myapp.conf", "--log-level", "info"]  # command-line arguments
+restart = "on-failure"        # restart policy: no | on-failure | always (default: "on-failure")
 user = "myapp"                # run-as user (default: "root")
 
 # Linux-specific (systemd) settings
 [services.linux]
-type = "simple"               # service type (default: "simple")
-after = ["network.target", "syslog.target"]  # start after these targets
+type = "simple"               # service type: simple (default), forking, notify, oneshot, exec
+                              # - simple: service runs in foreground, considered started immediately
+                              # - forking: service forks and parent exits (traditional daemon)
+                              # - notify: service calls sd_notify when ready
+                              # - oneshot: runs once and exits (for setup tasks)
+                              # - exec: like simple but waits until main binary is executed
+after = ["network.target", "syslog.target"]  # start after these systemd targets
 restart_sec = 5               # seconds between restart attempts
 
 # macOS-specific (launchd) settings
 [services.macos]
 run_at_load = true            # start on boot
 keep_alive = true             # restart on exit
+
+# Example: second service (post-MVP - not yet supported by installer)
+# [[services]]
+# name = "myapp-worker"
+# exec = "bin/myapp"
+# args = ["worker", "--queue", "default"]
+# restart = "always"
+# user = "myapp"
+#
+# [services.linux]
+# after = ["network.target", "myapp.service"]  # can depend on first service
+# restart_sec = 10

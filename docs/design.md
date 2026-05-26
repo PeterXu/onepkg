@@ -29,6 +29,7 @@ items = [
 [[services]]
 name = "main"                    # default: package name
 exec = "bin/test1"               # stripped path (no {platform} marker)
+args = ["--config", "etc/app.conf"]  # command-line arguments (optional)
 restart = "on-failure"           # no | on-failure | always
 user = "autotest"                # default: root
 
@@ -49,6 +50,7 @@ recovery_delay_ms = 5000
 [[services]]                     # second service
 name = "watcher"
 exec = "bin/test2"
+args = ["--mode", "watch"]       # arguments for second service
 restart = "always"
 ```
 
@@ -57,7 +59,8 @@ restart = "always"
 | Field | Linux (systemd) | macOS (launchd) | Windows |
 |-------|-----------------|-----------------|---------|
 | `name` | Unit name | Label | Service name |
-| `exec` | ExecStart | ProgramArguments | binPath |
+| `exec` | ExecStart binary | ProgramArguments[0] | binPath |
+| `args` | ExecStart arguments | ProgramArguments[1:] | appended to binPath |
 | `restart` | Restart= | KeepAlive + RunAtLoad | Service recovery |
 | `user` | User= | UserName | LocalSystem (no mapping) |
 
@@ -65,7 +68,7 @@ restart = "always"
 
 | Field | systemd Directive |
 |-------|-------------------|
-| `type` | Type= |
+| `type` | Type= (service startup behavior) |
 | `after` | After= |
 | `environment` | Environment= |
 | `restart_sec` | RestartSec= |
@@ -76,6 +79,16 @@ restart = "always"
 | `limit_nofile` | LimitNOFILE= |
 | `capabilities` | CapabilityBoundingSet= |
 | `working_dir` | WorkingDirectory= |
+
+**Service Type Values:**
+
+| Type | Behavior | Use Case |
+|------|----------|----------|
+| `simple` | Service runs in foreground, considered started immediately | Default; most Go servers |
+| `forking` | Service forks, parent exits, systemd detects fork complete | Traditional Unix daemons |
+| `notify` | Service sends readiness via sd_notify(3) | Services with explicit readiness signaling |
+| `oneshot` | Runs once and exits, remains "active" after exit | Setup scripts, one-time tasks |
+| `exec` | Like simple, but systemd waits until main binary execs | When pre-exec setup matters |
 
 ### macOS launchd Options
 
@@ -179,6 +192,7 @@ Examples:
 | `exclude` | `[]` (none) |
 | `services.name` | Package `name` |
 | `services.exec` | First `bin/*` item (stripped) |
+| `services.args` | `[]` (no arguments) |
 | `services.restart` | `on-failure` |
 | `services.user` | `root` |
 
