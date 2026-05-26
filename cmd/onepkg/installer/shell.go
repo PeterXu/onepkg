@@ -119,10 +119,10 @@ create_dirs() {
     fi
 
     for i in $(seq 0 $((DIRS_COUNT - 1))); do
-        eval "dir_path=\"\$DIR_${i}_PATH\""
-        eval "dir_owner=\"\$DIR_${i}_OWNER\""
-        eval "dir_group=\"\$DIR_${i}_GROUP\""
-        eval "dir_mode=\"\$DIR_${i}_MODE\""
+        local _var="DIR_${i}_PATH"; local dir_path="${!_var}"
+        local _var="DIR_${i}_OWNER"; local dir_owner="${!_var}"
+        local _var="DIR_${i}_GROUP"; local dir_group="${!_var}"
+        local _var="DIR_${i}_MODE"; local dir_mode="${!_var}"
 
         # Resolve relative paths
         if [ "${dir_path:0:1}" != "/" ]; then
