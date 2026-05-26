@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -51,9 +50,7 @@ func (c *Config) ApplyDefaults() {
 	if c.OutputDir == "" {
 		c.OutputDir = "packages"
 	}
-	if len(c.Platforms) == 0 {
-		c.Platforms = []string{runtime.GOOS + "-" + runtime.GOARCH}
-	}
+	// Platforms has no default - must be provided via --platform flag
 	for i := range c.Services {
 		if c.Services[i].Name == "" {
 			c.Services[i].Name = c.Name

@@ -151,8 +151,9 @@ func TestApplyDefaults(t *testing.T) {
 	if cfg.OutputDir != "packages" {
 		t.Errorf("OutputDir = %q, want %q", cfg.OutputDir, "packages")
 	}
-	if len(cfg.Platforms) != 1 {
-		t.Fatalf("len(Platforms) = %d, want 1", len(cfg.Platforms))
+	// Platforms should NOT have a default - must be provided via CLI
+	if len(cfg.Platforms) != 0 {
+		t.Errorf("len(Platforms) = %d, want 0 (platforms must be provided via --platform)", len(cfg.Platforms))
 	}
 	svc := cfg.Services[0]
 	if svc.Name != "myapp" {
