@@ -152,6 +152,14 @@ cmd_uninstall() {
 
 cmd_version() {
     local install_dir="$DEFAULT_DIR"
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --dir) install_dir="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
     if [ -f "$install_dir/VERSION" ]; then
         cat "$install_dir/VERSION"
     else
@@ -162,6 +170,14 @@ cmd_version() {
 
 cmd_list() {
     local install_dir="$DEFAULT_DIR"
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --dir) install_dir="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
     if [ ! -f "$install_dir/VERSION" ]; then
         echo "$PKG_NAME is not installed"
         exit 1
@@ -182,6 +198,14 @@ cmd_list() {
 
 cmd_verify() {
     local install_dir="$DEFAULT_DIR"
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --dir) install_dir="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
     if [ ! -f "$install_dir/VERSION" ]; then
         echo "$PKG_NAME is not installed"
         exit 1
@@ -229,9 +253,9 @@ shift 2>/dev/null || true
 case "$COMMAND" in
     install)   cmd_install "$@" ;;
     uninstall) cmd_uninstall "$@" ;;
-    version)   cmd_version ;;
-    list)      cmd_list ;;
-    verify)    cmd_verify ;;
+    version)   cmd_version "$@" ;;
+    list)      cmd_list "$@" ;;
+    verify)    cmd_verify "$@" ;;
     *)
         echo "$PKG_NAME $PKG_VERSION ($PKG_PLATFORM)"
         echo ""
@@ -240,9 +264,9 @@ case "$COMMAND" in
         echo "Commands:"
         echo "  install [--dir <path>]  Install to default or custom directory (requires root)"
         echo "  uninstall [--dir <path>] Remove installation and service (requires root)"
-        echo "  version                Show installed version"
-        echo "  list                   List installed files"
-        echo "  verify                 Verify file checksums"
+        echo "  version [--dir <path>] Show installed version"
+        echo "  list [--dir <path>]    List installed files"
+        echo "  verify [--dir <path>]  Verify file checksums"
         exit 1
         ;;
 esac
