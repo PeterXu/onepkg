@@ -90,11 +90,15 @@ func (c *Config) Validate(configDir string) error {
 		if err != nil || strings.HasPrefix(cleanRel, "..") {
 			return fmt.Errorf("path traversal not allowed in item %q", item)
 		}
-		fullPath := filepath.Join(configDir, item)
-		if _, err := os.Stat(fullPath); err != nil {
-			return fmt.Errorf("item %q does not exist", item)
+		// Skip file existence check for {platform} markers - validated at build time
+		if !HasPlatformMarker(item) {
+			fullPath := filepath.Join(configDir, item)
+			if _, err := os.Stat(fullPath); err != nil {
+				return fmt.Errorf("item %q does not exist", item)
+			}
 		}
 	}
+	// Service validation
 	itemSet := make(map[string]bool, len(c.Items))
 	for _, item := range c.Items {
 		itemSet[item] = true
@@ -103,10 +107,17 @@ func (c *Config) Validate(configDir string) error {
 		if svc.Name != "" && !isValidName(svc.Name) {
 			return fmt.Errorf("service name %q must contain only alphanumeric characters, hyphens, and underscores", svc.Name)
 		}
+		// Service exec validation needs to handle {platform} markers
 		if svc.Exec != "" && !itemSet[svc.Exec] {
+			// Check if exec matches a platform-marked item (stripped form)
 			matched := false
 			for _, item := range c.Items {
-				if strings.HasPrefix(svc.Exec, item) {
+				if HasPlatformMarker(item) {
+					if StripPlatformMarker(item) == svc.Exec {
+						matched = true
+						break
+					}
+				} else if strings.HasPrefix(svc.Exec, item) {
 					matched = true
 					break
 				}

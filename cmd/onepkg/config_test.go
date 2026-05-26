@@ -361,3 +361,78 @@ func TestStripPlatformMarker(t *testing.T) {
 		})
 	}
 }
+
+func TestValidatePlatformMarker(t *testing.T) {
+	dir := t.TempDir()
+	binDir := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Create platform-specific files
+	if err := os.WriteFile(filepath.Join(binDir, "myapp.linux-arm64"), []byte("binary"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Do NOT create the {platform} literal - it shouldn't be checked
+
+	tests := []struct {
+		name    string
+		cfg     *Config
+		wantErr string
+	}{
+		{
+			name: "platform marker skipped in validation",
+			cfg: &Config{
+				Name:    "myapp",
+				Version: "v1.0.0",
+				Items:   []string{"bin/myapp.{platform}"},
+			},
+			wantErr: "", // Should NOT error - {platform} items skip existence check
+		},
+		{
+			name: "mixed items - literal checked, marker skipped",
+			cfg: &Config{
+				Name:    "myapp",
+				Version: "v1.0.0",
+				Items:   []string{"bin/myapp.{platform}", "etc/config.conf"},
+			},
+			wantErr: "does not exist", // Literal item should be checked
+		},
+		{
+			name: "service exec matches stripped platform marker",
+			cfg: &Config{
+				Name:    "myapp",
+				Version: "v1.0.0",
+				Items:   []string{"bin/myapp.{platform}"},
+				Services: []ServiceConfig{{Name: "myapp", Exec: "bin/myapp"}},
+			},
+			wantErr: "", // Exec "bin/myapp" matches stripped marker
+		},
+		{
+			name: "service exec does not match stripped marker",
+			cfg: &Config{
+				Name:    "myapp",
+				Version: "v1.0.0",
+				Items:   []string{"bin/myapp.{platform}"},
+				Services: []ServiceConfig{{Name: "myapp", Exec: "bin/other"}},
+			},
+			wantErr: "service exec \"bin/other\" not found in items",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.cfg.Validate(dir)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Errorf("Validate() returned unexpected error: %v", err)
+				}
+			} else {
+				if err == nil {
+					t.Errorf("Validate() returned nil, want error containing %q", tt.wantErr)
+				} else if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("Validate() error = %q, want error containing %q", err.Error(), tt.wantErr)
+				}
+			}
+		})
+	}
+}
