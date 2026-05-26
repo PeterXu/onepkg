@@ -436,3 +436,26 @@ func TestValidatePlatformMarker(t *testing.T) {
 		})
 	}
 }
+
+func TestServiceExecPlatformMarkerRejected(t *testing.T) {
+	dir := t.TempDir()
+	binDir := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &Config{
+		Name:    "myapp",
+		Version: "v1.0.0",
+		Items:   []string{"bin/myapp.{platform}"},
+		Services: []ServiceConfig{{Name: "myapp", Exec: "bin/myapp.{platform}"}},
+	}
+
+	err := cfg.Validate(dir)
+	if err == nil {
+		t.Error("expected error for service exec with {platform} marker")
+	}
+	if !strings.Contains(err.Error(), "{platform} marker") {
+		t.Errorf("error should mention {platform} marker, got: %v", err)
+	}
+}

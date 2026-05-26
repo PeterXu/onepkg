@@ -107,7 +107,11 @@ func (c *Config) Validate(configDir string) error {
 		if svc.Name != "" && !isValidName(svc.Name) {
 			return fmt.Errorf("service name %q must contain only alphanumeric characters, hyphens, and underscores", svc.Name)
 		}
-		// Service exec validation needs to handle {platform} markers
+		// Service exec must not contain {platform} marker - use stripped path
+		if svc.Exec != "" && HasPlatformMarker(svc.Exec) {
+			return fmt.Errorf("service exec %q should not contain {platform} marker (use stripped path, e.g., \"bin/myapp\")", svc.Exec)
+		}
+		// Service exec validation needs to handle {platform} markers in items
 		if svc.Exec != "" && !itemSet[svc.Exec] {
 			// Check if exec matches a platform-marked item (stripped form)
 			matched := false
