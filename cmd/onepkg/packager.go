@@ -21,6 +21,42 @@ type FileEntry struct {
 	Size    int64
 }
 
+// ResolvedItem represents an item path after platform resolution
+type ResolvedItem struct {
+	Original string // Original item from config (e.g., "bin/myapp.{platform}")
+	Resolved string // Resolved path (e.g., "bin/myapp.linux-arm64")
+	PackPath string // Path to use in package (e.g., "bin/myapp" - marker stripped)
+}
+
+// ResolveItems resolves {platform} markers in items for a specific platform
+// Returns error if a platform-specific file does not exist (no fallback)
+func ResolveItems(configDir string, items []string, platform string) ([]ResolvedItem, error) {
+	var resolved []ResolvedItem
+	for _, item := range items {
+		ri := ResolvedItem{
+			Original: item,
+		}
+
+		if HasPlatformMarker(item) {
+			ri.Resolved = ResolvePlatformItem(item, platform)
+			ri.PackPath = StripPlatformMarker(item)
+
+			// Verify the platform-specific file exists - NO FALLBACK
+			fullPath := filepath.Join(configDir, ri.Resolved)
+			if _, err := os.Stat(fullPath); err != nil {
+				return nil, fmt.Errorf("item %q (resolved to %q) does not exist for platform %s", item, ri.Resolved, platform)
+			}
+		} else {
+			// Literal item - no resolution needed
+			ri.Resolved = item
+			ri.PackPath = item
+		}
+
+		resolved = append(resolved, ri)
+	}
+	return resolved, nil
+}
+
 func CollectFiles(configDir string, items []string) ([]FileEntry, error) {
 	var entries []FileEntry
 	for _, item := range items {

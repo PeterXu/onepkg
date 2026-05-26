@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -193,5 +194,121 @@ func TestBuildTarGZ(t *testing.T) {
 	}
 	if !found["etc/app.conf"] {
 		t.Error("tar missing etc/app.conf")
+	}
+}
+
+func TestResolveItems(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create platform-specific binaries
+	binDir := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(binDir, "myapp.linux-arm64"), []byte("binary-linux-arm64"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(binDir, "myapp.linux-amd64"), []byte("binary-linux-amd64"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(binDir, "helper.linux-arm64"), []byte("helper-linux"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create non-platform-specific files
+	etcDir := filepath.Join(dir, "etc")
+	if err := os.MkdirAll(etcDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(etcDir, "config.conf"), []byte("config-data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	items := []string{
+		"bin/myapp.{platform}",
+		"bin/helper.{platform}",
+		"etc/config.conf",
+	}
+
+	resolved, err := ResolveItems(dir, items, "linux-arm64")
+	if err != nil {
+		t.Fatalf("ResolveItems returned error: %v", err)
+	}
+
+	// Check resolved items have correct paths
+	expectedResolved := map[string]string{
+		"bin/myapp.{platform}":  "bin/myapp.linux-arm64",
+		"bin/helper.{platform}": "bin/helper.linux-arm64",
+		"etc/config.conf":       "etc/config.conf",
+	}
+
+	for original, wantResolved := range expectedResolved {
+		found := false
+		for _, r := range resolved {
+			if r.Original == original && r.Resolved == wantResolved {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("missing resolved item for %q: want resolved=%q", original, wantResolved)
+		}
+	}
+
+	// Check that files exist
+	for _, r := range resolved {
+		fullPath := filepath.Join(dir, r.Resolved)
+		if _, err := os.Stat(fullPath); err != nil {
+			t.Errorf("resolved file %q does not exist at %s", r.Resolved, fullPath)
+		}
+	}
+}
+
+func TestResolveItemsMissingPlatformFile(t *testing.T) {
+	dir := t.TempDir()
+
+	binDir := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Only create linux-amd64, not linux-arm64
+	if err := os.WriteFile(filepath.Join(binDir, "myapp.linux-amd64"), []byte("binary"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	items := []string{"bin/myapp.{platform}"}
+
+	_, err := ResolveItems(dir, items, "linux-arm64")
+	if err == nil {
+		t.Fatal("expected error for missing platform file")
+	}
+	if !strings.Contains(err.Error(), "bin/myapp.linux-arm64") {
+		t.Errorf("error should mention missing file, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "does not exist") {
+		t.Errorf("error should say 'does not exist', got: %v", err)
+	}
+}
+
+func TestResolveItemsNoFallback(t *testing.T) {
+	dir := t.TempDir()
+
+	binDir := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Create base file but NOT platform-specific file
+	if err := os.WriteFile(filepath.Join(binDir, "myapp"), []byte("base-binary"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	items := []string{"bin/myapp.{platform}"}
+
+	_, err := ResolveItems(dir, items, "linux-arm64")
+	if err == nil {
+		t.Fatal("expected error - should NOT fall back to base file")
+	}
+	if !strings.Contains(err.Error(), "does not exist") {
+		t.Errorf("error should mention missing platform file, got: %v", err)
 	}
 }
