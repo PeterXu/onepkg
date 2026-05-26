@@ -15,6 +15,7 @@ type Config struct {
 	Platforms          []string        `toml:"platforms"`
 	OutputDir          string          `toml:"output_dir"`
 	PreservePermissions *bool          `toml:"preserve_permissions"` // nil = default true
+	Exclude            []string        `toml:"exclude"`              // patterns to exclude from package
 	Items              []string        `toml:"items"`
 	Services           []ServiceConfig `toml:"services"`
 }

@@ -58,6 +58,15 @@ func ResolveItems(configDir string, items []string, platform string) ([]Resolved
 }
 
 func CollectFiles(configDir string, items []string) ([]FileEntry, error) {
+	return CollectFilesWithExclude(configDir, items, nil)
+}
+
+// CollectFilesWithExclude collects files from items, excluding paths matching patterns.
+// Patterns:
+//   - "tests/" - exclude directory and all contents (prefix match)
+//   - "*.md" - exclude files matching glob pattern at basename level
+//   - ".git*" - exclude files/dirs matching prefix glob
+func CollectFilesWithExclude(configDir string, items []string, exclude []string) ([]FileEntry, error) {
 	var entries []FileEntry
 	for _, item := range items {
 		cleanItem := strings.TrimRight(item, "/")
@@ -80,6 +89,10 @@ func CollectFiles(configDir string, items []string) ([]FileEntry, error) {
 				if err != nil {
 					return err
 				}
+				// Check exclude patterns
+				if IsExcluded(relPath, exclude) {
+					return nil // skip this file
+				}
 				entry, err := makeFileEntry(configDir, relPath)
 				if err != nil {
 					return err
@@ -91,6 +104,10 @@ func CollectFiles(configDir string, items []string) ([]FileEntry, error) {
 				return nil, fmt.Errorf("walk %s: %w", item, err)
 			}
 		} else {
+			// Check exclude for single file
+			if IsExcluded(cleanItem, exclude) {
+				continue // skip this item
+			}
 			entry, err := makeFileEntry(configDir, cleanItem)
 			if err != nil {
 				return nil, err
@@ -101,9 +118,85 @@ func CollectFiles(configDir string, items []string) ([]FileEntry, error) {
 	return entries, nil
 }
 
+// IsExcluded checks if relPath matches any exclude pattern
+func IsExcluded(relPath string, patterns []string) bool {
+	for _, pattern := range patterns {
+		if MatchesExcludePattern(relPath, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+// MatchesExcludePattern checks if relPath matches a single exclude pattern.
+// Pattern types:
+//   - "dir/" - matches any path starting with "dir/" (directory exclusion)
+//   - "*.ext" - matches basename against glob at ROOT LEVEL only (not subdirs)
+//   - "prefix*" - matches if relPath starts with prefix
+//   - "exact" - exact match
+//   - "dir/*.ext" - glob in subdirectory (matches files in dir/ with .ext)
+func MatchesExcludePattern(relPath, pattern string) bool {
+	// Directory pattern: "tests/" matches "tests/file.go" and "tests/sub/file.go"
+	if strings.HasSuffix(pattern, "/") {
+		prefix := strings.TrimSuffix(pattern, "/")
+		return strings.HasPrefix(relPath, prefix+"/") || relPath == prefix
+	}
+
+	// Path glob pattern: "docs/*.md" matches "docs/README.md"
+	if strings.Contains(pattern, "/") {
+		// Use filepath.Match for path-aware globbing
+		matched, err := filepath.Match(pattern, relPath)
+		if err == nil && matched {
+			return true
+		}
+		// Also check if pattern is a directory prefix + glob
+		// e.g., "docs/*.md" should match files in docs/ with .md extension
+		patternDir, patternGlob := filepath.Dir(pattern), filepath.Base(pattern)
+		relDir, relBase := filepath.Dir(relPath), filepath.Base(relPath)
+		// Normalize "." to empty string for root
+		if patternDir == "." {
+			patternDir = ""
+		}
+		if relDir == "." {
+			relDir = ""
+		}
+		if relDir == patternDir {
+			matched, err := filepath.Match(patternGlob, relBase)
+			if err == nil && matched {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Simple glob at ROOT LEVEL only: "*.md" matches "README.md" but not "docs/README.md"
+	basename := filepath.Base(relPath)
+	matched, err := filepath.Match(pattern, basename)
+	if err == nil && matched {
+		// Only match if file is at root level (no directory in path)
+		relDir := filepath.Dir(relPath)
+		if relDir == "." || relDir == "" {
+			return true
+		}
+	}
+
+	// Prefix glob: ".git*" matches ".gitignore" and ".git/config"
+	// Check if relPath starts with the prefix (before *)
+	if strings.Contains(pattern, "*") {
+		prefix := strings.SplitN(pattern, "*", 2)[0]
+		if prefix != "" && strings.HasPrefix(relPath, prefix) {
+			return true
+		}
+	}
+
+	// Exact match
+	return relPath == pattern
+}
+
 // CollectFilesResolved collects files from resolved items.
 // It reads files from Resolved paths but packs them with PackPath (marker stripped).
-func CollectFilesResolved(configDir string, items []ResolvedItem) ([]FileEntry, error) {
+// Exclude patterns are applied to the PackPath (the final path in the package).
+func CollectFilesResolved(configDir string, items []ResolvedItem, exclude []string) ([]FileEntry, error) {
 	var entries []FileEntry
 	for _, item := range items {
 		cleanResolved := strings.TrimRight(item.Resolved, "/")
@@ -130,6 +223,10 @@ func CollectFilesResolved(configDir string, items []ResolvedItem) ([]FileEntry, 
 				}
 				// Combine with PackPath for the final RelPath
 				packRelPath := filepath.Join(cleanPackPath, relToResolved)
+				// Check exclude patterns against PackPath
+				if IsExcluded(packRelPath, exclude) {
+					return nil // skip this file
+				}
 				entry, err := makeFileEntryWithPackPath(configDir, path, packRelPath)
 				if err != nil {
 					return err
@@ -141,6 +238,10 @@ func CollectFilesResolved(configDir string, items []ResolvedItem) ([]FileEntry, 
 				return nil, fmt.Errorf("walk %s: %w", item.Resolved, err)
 			}
 		} else {
+			// Check exclude for single file (against PackPath)
+			if IsExcluded(cleanPackPath, exclude) {
+				continue // skip this item
+			}
 			entry, err := makeFileEntryWithPackPath(configDir, fullPath, cleanPackPath)
 			if err != nil {
 				return nil, err

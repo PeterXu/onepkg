@@ -339,7 +339,7 @@ func TestCollectFilesWithResolvedItems(t *testing.T) {
 		{Original: "etc/config.conf", Resolved: "etc/config.conf", PackPath: "etc/config.conf"},
 	}
 
-	entries, err := CollectFilesResolved(dir, resolved)
+	entries, err := CollectFilesResolved(dir, resolved, nil) // no exclude patterns
 	if err != nil {
 		t.Fatalf("CollectFilesResolved returned error: %v", err)
 	}
@@ -493,5 +493,151 @@ func TestBuildTarGZPreservePermissionsTrue(t *testing.T) {
 				t.Errorf("etc/app.conf mode = %o, want 0600 (original preserved)", hdr.Mode)
 			}
 		}
+	}
+}
+
+func TestMatchesExcludePattern(t *testing.T) {
+	tests := []struct {
+		relPath  string
+		pattern  string
+		expected bool
+	}{
+		// Directory patterns (trailing /)
+		{"tests/test1.go", "tests/", true},
+		{"tests/subdir/test2.go", "tests/", true},
+		{"src/main.go", "tests/", false},
+		{"libtests/main.go", "tests/", false}, // prefix match only
+
+		// Glob patterns (*)
+		{"README.md", "*.md", true},
+		{"docs/README.md", "*.md", false},    // glob only matches basename
+		{"CHANGELOG.md", "*.md", true},
+		{"main.go", "*.md", false},
+
+		// Prefix patterns (*suffix)
+		{".gitignore", ".git*", true},
+		{".git/config", ".git*", true},
+		{".github/workflows.yml", ".git*", true},
+		{"gitignore", ".git*", false}, // missing leading dot
+
+		// Exact match
+		{"config.local", "config.local", true},
+		{"config.local.json", "config.local", false},
+
+		// Combined patterns
+		{"docs/README.md", "docs/*.md", true},
+		{"docs/test.go", "docs/*.md", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.relPath+"_"+tt.pattern, func(t *testing.T) {
+			result := MatchesExcludePattern(tt.relPath, tt.pattern)
+			if result != tt.expected {
+				t.Errorf("MatchesExcludePattern(%q, %q) = %v, want %v", tt.relPath, tt.pattern, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestCollectFilesWithExclude(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create directory structure
+	if err := os.MkdirAll(filepath.Join(dir, "bin"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "tests"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "docs"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create files
+	if err := os.WriteFile(filepath.Join(dir, "bin", "app"), []byte("binary"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "tests", "test.go"), []byte("test"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Create subdirectory first, then file
+	if err := os.MkdirAll(filepath.Join(dir, "tests", "sub"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "tests", "sub", "test2.go"), []byte("test2"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("readme"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "docs", "README.md"), []byte("doc"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("gitignore"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".git", "config"), []byte("config"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Collect all items with exclude patterns
+	exclude := []string{"tests/", "*.md", ".git*"}
+	entries, err := CollectFilesWithExclude(dir, []string{"bin/", "tests/", "docs/", "README.md", ".gitignore", ".git/"}, exclude)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Check excluded files are not in entries
+	for _, e := range entries {
+		// tests/ should be excluded
+		if strings.HasPrefix(e.RelPath, "tests/") {
+			t.Errorf("tests/ should be excluded, but found: %s", e.RelPath)
+		}
+		// *.md should exclude README.md (but not docs/README.md since glob matches basename only)
+		if e.RelPath == "README.md" {
+			t.Errorf("README.md should be excluded by *.md, but found")
+		}
+		// docs/*.md is NOT excluded by "*.md" - glob only matches basename at root level
+		if strings.Contains(e.RelPath, ".git") {
+			t.Errorf(".git* files should be excluded, but found: %s", e.RelPath)
+		}
+	}
+
+	// Check included files are present
+	foundBinApp := false
+	for _, e := range entries {
+		if e.RelPath == "bin/app" {
+			foundBinApp = true
+		}
+	}
+	if !foundBinApp {
+		t.Error("bin/app should be included")
+	}
+}
+
+func TestCollectFilesExcludeEmpty(t *testing.T) {
+	dir := t.TempDir()
+
+	if err := os.MkdirAll(filepath.Join(dir, "bin"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "bin", "app"), []byte("binary"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Empty exclude list - should collect everything
+	entries, err := CollectFilesWithExclude(dir, []string{"bin/app"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(entries) != 1 {
+		t.Errorf("len(entries) = %d, want 1", len(entries))
+	}
+	if entries[0].RelPath != "bin/app" {
+		t.Errorf("entries[0].RelPath = %q, want %q", entries[0].RelPath, "bin/app")
 	}
 }

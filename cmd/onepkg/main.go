@@ -93,7 +93,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		entries, err := CollectFilesResolved(configDir, resolved)
+		entries, err := CollectFilesResolved(configDir, resolved, cfg.Exclude)
 		if err != nil {
 			fmt.Printf("Error collecting files for %s: %v\n", platform, err)
 			os.Exit(1)

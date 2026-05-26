@@ -649,3 +649,62 @@ items = ["bin/myapp"]
 		t.Errorf("PreservePermissions after ApplyDefaults = %v, want true", cfg3.PreservePermissions)
 	}
 }
+
+func TestParseConfigWithExclude(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+
+	content := `
+name = "myapp"
+version = "v1.0.0"
+
+exclude = ["tests/", "*.md", ".git*"]
+
+items = ["bin/myapp", "lib/", "docs/"]
+`
+	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := ParseConfig(configPath)
+	if err != nil {
+		t.Fatalf("ParseConfig returned error: %v", err)
+	}
+
+	if len(cfg.Exclude) != 3 {
+		t.Errorf("len(Exclude) = %d, want 3", len(cfg.Exclude))
+	}
+	if cfg.Exclude[0] != "tests/" {
+		t.Errorf("Exclude[0] = %q, want %q", cfg.Exclude[0], "tests/")
+	}
+	if cfg.Exclude[1] != "*.md" {
+		t.Errorf("Exclude[1] = %q, want %q", cfg.Exclude[1], "*.md")
+	}
+	if cfg.Exclude[2] != ".git*" {
+		t.Errorf("Exclude[2] = %q, want %q", cfg.Exclude[2], ".git*")
+	}
+}
+
+func TestParseConfigExcludeEmpty(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+
+	// No exclude field
+	content := `
+name = "myapp"
+version = "v1.0.0"
+items = ["bin/myapp"]
+`
+	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := ParseConfig(configPath)
+	if err != nil {
+		t.Fatalf("ParseConfig returned error: %v", err)
+	}
+
+	if len(cfg.Exclude) != 0 {
+		t.Errorf("len(Exclude) = %d, want 0 (no exclude field)", len(cfg.Exclude))
+	}
+}
