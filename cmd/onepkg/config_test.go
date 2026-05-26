@@ -538,3 +538,40 @@ restart = "on-failure"
 		t.Errorf("len(Args) = %d, want 0 (no args field in config)", len(svc.Args))
 	}
 }
+
+func TestParseConfigWithWorkingDir(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+
+	content := `
+name = "myapp"
+version = "v1.0.0"
+
+items = ["bin/myapp"]
+
+[[services]]
+name = "myapp"
+exec = "bin/myapp"
+
+[services.linux]
+working_dir = "/var/lib/myapp"
+
+[services.macos]
+working_dir = "/opt/myapp/data"
+`
+	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := ParseConfig(configPath)
+	if err != nil {
+		t.Fatalf("ParseConfig returned error: %v", err)
+	}
+
+	if cfg.Services[0].Linux.WorkingDir != "/var/lib/myapp" {
+		t.Errorf("Linux.WorkingDir = %q, want %q", cfg.Services[0].Linux.WorkingDir, "/var/lib/myapp")
+	}
+	if cfg.Services[0].MacOS.WorkingDir != "/opt/myapp/data" {
+		t.Errorf("MacOS.WorkingDir = %q, want %q", cfg.Services[0].MacOS.WorkingDir, "/opt/myapp/data")
+	}
+}

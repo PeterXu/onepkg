@@ -32,11 +32,13 @@ type LinuxService struct {
 	Type       string   `toml:"type"`
 	After      []string `toml:"after"`
 	RestartSec int      `toml:"restart_sec"`
+	WorkingDir string   `toml:"working_dir"`
 }
 
 type MacOSService struct {
-	RunAtLoad bool `toml:"run_at_load"`
-	KeepAlive bool `toml:"keep_alive"`
+	RunAtLoad  bool   `toml:"run_at_load"`
+	KeepAlive  bool   `toml:"keep_alive"`
+	WorkingDir string `toml:"working_dir"`
 }
 
 func ParseConfig(path string) (*Config, error) {
