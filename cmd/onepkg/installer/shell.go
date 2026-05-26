@@ -71,11 +71,15 @@ install_service() {
     local install_dir="$1"
     if [ "$SERVICE_TYPE" = "systemd" ]; then
         echo "$SERVICE_B64" | base64 -d > "/etc/systemd/system/$SERVICE_NAME"
+        # Update paths from DEFAULT_DIR to actual install location
+        sed -i "s|$DEFAULT_DIR|$install_dir|g" "/etc/systemd/system/$SERVICE_NAME"
         systemctl daemon-reload
         systemctl enable "$SERVICE_NAME"
         systemctl start "$SERVICE_NAME"
     elif [ "$SERVICE_TYPE" = "launchd" ]; then
         echo "$SERVICE_B64" | base64 -d > "/Library/LaunchDaemons/$SERVICE_NAME"
+        # Update paths from DEFAULT_DIR to actual install location
+        sed -i "s|$DEFAULT_DIR|$install_dir|g" "/Library/LaunchDaemons/$SERVICE_NAME"
         launchctl load "/Library/LaunchDaemons/$SERVICE_NAME"
     fi
 }
