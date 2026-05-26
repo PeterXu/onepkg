@@ -5,6 +5,13 @@ import (
 	"strings"
 )
 
+type DirSpec struct {
+	Path  string
+	Owner string
+	Group string
+	Mode  string
+}
+
 type ShellConfig struct {
 	Name           string
 	Version        string
@@ -16,6 +23,7 @@ type ShellConfig struct {
 	ServiceContent string
 	ServiceType    string
 	ServiceName    string
+	Dirs           []DirSpec
 }
 
 func GenerateShellInstaller(cfg ShellConfig) (string, error) {
@@ -32,6 +40,13 @@ func GenerateShellInstaller(cfg ShellConfig) (string, error) {
 	fmt.Fprintf(&b, "DEFAULT_DIR=%q\n", cfg.DefaultDir)
 	fmt.Fprintf(&b, "SERVICE_TYPE=%q\n", cfg.ServiceType)
 	fmt.Fprintf(&b, "SERVICE_NAME=%q\n", cfg.ServiceName)
+	fmt.Fprintf(&b, "DIRS_COUNT=%d\n", len(cfg.Dirs))
+	for i, d := range cfg.Dirs {
+		fmt.Fprintf(&b, "DIR_%d_PATH=%q\n", i, d.Path)
+		fmt.Fprintf(&b, "DIR_%d_OWNER=%q\n", i, d.Owner)
+		fmt.Fprintf(&b, "DIR_%d_GROUP=%q\n", i, d.Group)
+		fmt.Fprintf(&b, "DIR_%d_MODE=%q\n", i, d.Mode)
+	}
 	b.WriteString("\n")
 
 	b.WriteString("PAYLOAD='")
@@ -96,6 +111,36 @@ uninstall_service() {
     fi
 }
 
+create_dirs() {
+    local install_dir="$1"
+
+    if [ "$DIRS_COUNT" -eq 0 ] || [ -z "$DIRS_COUNT" ]; then
+        return
+    fi
+
+    for i in $(seq 0 $((DIRS_COUNT - 1))); do
+        eval "dir_path=\"\$DIR_${i}_PATH\""
+        eval "dir_owner=\"\$DIR_${i}_OWNER\""
+        eval "dir_group=\"\$DIR_${i}_GROUP\""
+        eval "dir_mode=\"\$DIR_${i}_MODE\""
+
+        # Resolve relative paths
+        if [ "${dir_path:0:1}" != "/" ]; then
+            dir_path="$install_dir/$dir_path"
+        fi
+
+        mkdir -p "$dir_path"
+
+        if [ -n "$dir_owner" ]; then
+            chown "${dir_owner}:${dir_group:-$dir_owner}" "$dir_path"
+        fi
+
+        if [ -n "$dir_mode" ]; then
+            chmod "$dir_mode" "$dir_path"
+        fi
+    done
+}
+
 `)
 	b.WriteString(`cmd_install() {
     check_arch
@@ -126,6 +171,12 @@ uninstall_service() {
     echo "$PAYLOAD" | base64 -d | tar xzf - -C "$install_dir"
 
     echo "$VERSION_B64" | base64 -d > "$install_dir/VERSION"
+
+    # Create directories if configured
+    if [ "$DIRS_COUNT" -gt 0 ]; then
+        echo "Creating directories..."
+        create_dirs "$install_dir"
+    fi
 
     if [ "$SERVICE_TYPE" != "none" ] && [ -n "$SERVICE_B64" ]; then
         echo "Installing service..."

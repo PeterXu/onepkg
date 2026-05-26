@@ -109,3 +109,80 @@ func TestGenerateShellInstallerDarwin(t *testing.T) {
 		t.Error("darwin arm64 should expect arm64")
 	}
 }
+
+func TestGenerateShellInstallerWithDirs(t *testing.T) {
+	cfg := ShellConfig{
+		Name:           "myapp",
+		Version:        "v1.0.0",
+		Platform:       "linux-arm64",
+		ExpectedArch:   "aarch64",
+		DefaultDir:     "/usr/local/myapp",
+		PayloadBase64:  "dGVzdA==",
+		VersionContent: "dGVzdA==",
+		ServiceType:    "none",
+		ServiceName:    "",
+		Dirs: []DirSpec{
+			{Path: "/var/log/myapp", Owner: "myapp", Group: "myapp", Mode: "0755"},
+			{Path: "data", Owner: "myapp", Group: "myapp", Mode: "0750"},
+		},
+	}
+
+	output, err := GenerateShellInstaller(cfg)
+	if err != nil {
+		t.Fatalf("GenerateShellInstaller returned error: %v", err)
+	}
+
+	// Check DIRS_COUNT
+	if !strings.Contains(output, "DIRS_COUNT=2") {
+		t.Error("output missing DIRS_COUNT=2")
+	}
+
+	// Check DIR_0 variables
+	if !strings.Contains(output, "DIR_0_PATH=\"/var/log/myapp\"") {
+		t.Error("output missing DIR_0_PATH")
+	}
+	if !strings.Contains(output, "DIR_0_OWNER=\"myapp\"") {
+		t.Error("output missing DIR_0_OWNER")
+	}
+	if !strings.Contains(output, "DIR_0_GROUP=\"myapp\"") {
+		t.Error("output missing DIR_0_GROUP")
+	}
+	if !strings.Contains(output, "DIR_0_MODE=\"0755\"") {
+		t.Error("output missing DIR_0_MODE")
+	}
+
+	// Check DIR_1 variables (relative path)
+	if !strings.Contains(output, "DIR_1_PATH=\"data\"") {
+		t.Error("output missing DIR_1_PATH")
+	}
+
+	// Check create_dirs function exists
+	if !strings.Contains(output, "create_dirs()") {
+		t.Error("output missing create_dirs function")
+	}
+}
+
+func TestGenerateShellInstallerNoDirs(t *testing.T) {
+	cfg := ShellConfig{
+		Name:           "myapp",
+		Version:        "v1.0.0",
+		Platform:       "linux-arm64",
+		ExpectedArch:   "aarch64",
+		DefaultDir:     "/usr/local/myapp",
+		PayloadBase64:  "dGVzdA==",
+		VersionContent: "dGVzdA==",
+		ServiceType:    "none",
+		ServiceName:    "",
+		Dirs:           []DirSpec{}, // Empty
+	}
+
+	output, err := GenerateShellInstaller(cfg)
+	if err != nil {
+		t.Fatalf("GenerateShellInstaller returned error: %v", err)
+	}
+
+	// Should have DIRS_COUNT=0
+	if !strings.Contains(output, "DIRS_COUNT=0") {
+		t.Error("output should have DIRS_COUNT=0 for empty dirs")
+	}
+}
