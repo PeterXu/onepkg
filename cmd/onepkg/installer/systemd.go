@@ -8,6 +8,7 @@ import (
 type SystemdConfig struct {
 	Name       string
 	Exec       string
+	Args       []string
 	Restart    string
 	User       string
 	Type       string
@@ -29,7 +30,12 @@ func GenerateSystemdUnit(cfg SystemdConfig) string {
 	if cfg.Type != "" {
 		fmt.Fprintf(&b, "Type=%s\n", cfg.Type)
 	}
-	fmt.Fprintf(&b, "ExecStart=%s\n", cfg.Exec)
+	// ExecStart includes binary and arguments
+	execStart := cfg.Exec
+	if len(cfg.Args) > 0 {
+		execStart = execStart + " " + strings.Join(cfg.Args, " ")
+	}
+	fmt.Fprintf(&b, "ExecStart=%s\n", execStart)
 	fmt.Fprintf(&b, "Restart=%s\n", cfg.Restart)
 	if cfg.RestartSec > 0 {
 		fmt.Fprintf(&b, "RestartSec=%d\n", cfg.RestartSec)

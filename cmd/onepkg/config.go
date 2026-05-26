@@ -21,6 +21,7 @@ type Config struct {
 type ServiceConfig struct {
 	Name    string       `toml:"name"`
 	Exec    string       `toml:"exec"`
+	Args    []string     `toml:"args"`
 	Restart string       `toml:"restart"`
 	User    string       `toml:"user"`
 	Linux   LinuxService `toml:"linux"`

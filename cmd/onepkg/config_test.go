@@ -459,3 +459,82 @@ func TestServiceExecPlatformMarkerRejected(t *testing.T) {
 		t.Errorf("error should mention {platform} marker, got: %v", err)
 	}
 }
+
+func TestParseConfigWithArgs(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+
+	content := `
+name = "myapp"
+version = "v1.0.0"
+
+items = ["bin/myapp"]
+
+[[services]]
+name = "myapp"
+exec = "bin/myapp"
+args = ["--config", "etc/myapp.conf", "--log-level", "info"]
+restart = "on-failure"
+`
+	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := ParseConfig(configPath)
+	if err != nil {
+		t.Fatalf("ParseConfig returned error: %v", err)
+	}
+
+	if len(cfg.Services) != 1 {
+		t.Fatalf("len(Services) = %d, want 1", len(cfg.Services))
+	}
+	svc := cfg.Services[0]
+	if len(svc.Args) != 4 {
+		t.Errorf("len(Args) = %d, want 4", len(svc.Args))
+	}
+	if svc.Args[0] != "--config" {
+		t.Errorf("Args[0] = %q, want %q", svc.Args[0], "--config")
+	}
+	if svc.Args[1] != "etc/myapp.conf" {
+		t.Errorf("Args[1] = %q, want %q", svc.Args[1], "etc/myapp.conf")
+	}
+	if svc.Args[2] != "--log-level" {
+		t.Errorf("Args[2] = %q, want %q", svc.Args[2], "--log-level")
+	}
+	if svc.Args[3] != "info" {
+		t.Errorf("Args[3] = %q, want %q", svc.Args[3], "info")
+	}
+}
+
+func TestParseConfigEmptyArgs(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+
+	content := `
+name = "myapp"
+version = "v1.0.0"
+
+items = ["bin/myapp"]
+
+[[services]]
+name = "myapp"
+exec = "bin/myapp"
+restart = "on-failure"
+`
+	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := ParseConfig(configPath)
+	if err != nil {
+		t.Fatalf("ParseConfig returned error: %v", err)
+	}
+
+	if len(cfg.Services) != 1 {
+		t.Fatalf("len(Services) = %d, want 1", len(cfg.Services))
+	}
+	svc := cfg.Services[0]
+	if len(svc.Args) != 0 {
+		t.Errorf("len(Args) = %d, want 0 (no args field in config)", len(svc.Args))
+	}
+}

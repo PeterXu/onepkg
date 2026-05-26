@@ -62,3 +62,39 @@ func TestGenerateSystemdUnitMinimal(t *testing.T) {
 		t.Error("missing User=root")
 	}
 }
+
+func TestGenerateSystemdUnitWithArgs(t *testing.T) {
+	cfg := SystemdConfig{
+		Name:    "myapp",
+		Exec:    "/usr/local/myapp/bin/myapp",
+		Args:    []string{"--config", "etc/myapp.conf", "--log-level", "info"},
+		Restart: "on-failure",
+		User:    "root",
+	}
+
+	output := GenerateSystemdUnit(cfg)
+
+	// ExecStart should include the binary and all arguments
+	expectedExecStart := "ExecStart=/usr/local/myapp/bin/myapp --config etc/myapp.conf --log-level info"
+	if !strings.Contains(output, expectedExecStart) {
+		t.Errorf("output missing %q\nfull output:\n%s", expectedExecStart, output)
+	}
+}
+
+func TestGenerateSystemdUnitEmptyArgs(t *testing.T) {
+	cfg := SystemdConfig{
+		Name:    "myapp",
+		Exec:    "/usr/local/myapp/bin/myapp",
+		Args:    []string{},
+		Restart: "on-failure",
+		User:    "root",
+	}
+
+	output := GenerateSystemdUnit(cfg)
+
+	// Empty args should produce ExecStart without arguments
+	expectedExecStart := "ExecStart=/usr/local/myapp/bin/myapp\n"
+	if !strings.Contains(output, expectedExecStart) {
+		t.Errorf("output should have ExecStart without args\nfull output:\n%s", output)
+	}
+}

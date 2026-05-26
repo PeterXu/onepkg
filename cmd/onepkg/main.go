@@ -155,6 +155,7 @@ func BuildForPlatform(cfg *Config, platform string, entries []FileEntry, tarData
 			serviceContent = installer.GenerateSystemdUnit(installer.SystemdConfig{
 				Name:       svc.Name,
 				Exec:       filepath.Join(defaultDir, svc.Exec),
+				Args:       svc.Args,
 				Restart:    svc.Restart,
 				User:       svc.User,
 				Type:       svc.Linux.Type,
@@ -171,6 +172,7 @@ func BuildForPlatform(cfg *Config, platform string, entries []FileEntry, tarData
 			serviceContent = installer.GenerateLaunchdPlist(installer.LaunchdConfig{
 				Name:      svc.Name,
 				Exec:      filepath.Join(defaultDir, svc.Exec),
+				Args:      svc.Args,
 				User:      svc.User,
 				RunAtLoad: svc.MacOS.RunAtLoad,
 				KeepAlive: svc.MacOS.KeepAlive,

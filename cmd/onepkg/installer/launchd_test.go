@@ -60,3 +60,53 @@ func TestGenerateLaunchdPlistMinimal(t *testing.T) {
 		t.Error("missing UserName root")
 	}
 }
+
+func TestGenerateLaunchdPlistWithArgs(t *testing.T) {
+	cfg := LaunchdConfig{
+		Name:      "myapp",
+		Exec:      "/opt/myapp/bin/myapp",
+		Args:      []string{"--config", "etc/myapp.conf", "--log-level", "info"},
+		User:      "root",
+		RunAtLoad: true,
+		KeepAlive: true,
+	}
+
+	output := GenerateLaunchdPlist(cfg)
+
+	// With args, should use ProgramArguments instead of Program
+	if strings.Contains(output, "<key>Program</key>") {
+		t.Error("with args should use ProgramArguments, not Program")
+	}
+	if !strings.Contains(output, "<key>ProgramArguments</key>") {
+		t.Error("missing ProgramArguments key")
+	}
+	// ProgramArguments should contain binary as first element, then args
+	if !strings.Contains(output, "<string>/opt/myapp/bin/myapp</string>") {
+		t.Error("missing binary path in ProgramArguments")
+	}
+	if !strings.Contains(output, "<string>--config</string>") {
+		t.Error("missing --config argument")
+	}
+	if !strings.Contains(output, "<string>etc/myapp.conf</string>") {
+		t.Error("missing config file argument")
+	}
+}
+
+func TestGenerateLaunchdPlistEmptyArgs(t *testing.T) {
+	cfg := LaunchdConfig{
+		Name: "myapp",
+		Exec: "/opt/myapp/bin/myapp",
+		Args: []string{},
+		User: "root",
+	}
+
+	output := GenerateLaunchdPlist(cfg)
+
+	// Empty args should use Program (simpler form)
+	if !strings.Contains(output, "<key>Program</key>") {
+		t.Error("empty args should use Program key")
+	}
+	if strings.Contains(output, "ProgramArguments") {
+		t.Error("empty args should not use ProgramArguments")
+	}
+}
