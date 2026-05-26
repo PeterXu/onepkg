@@ -312,3 +312,58 @@ func TestResolveItemsNoFallback(t *testing.T) {
 		t.Errorf("error should mention missing platform file, got: %v", err)
 	}
 }
+
+func TestCollectFilesWithResolvedItems(t *testing.T) {
+	dir := t.TempDir()
+
+	binDir := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	etcDir := filepath.Join(dir, "etc")
+	if err := os.MkdirAll(etcDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Platform-specific binary
+	if err := os.WriteFile(filepath.Join(binDir, "myapp.linux-arm64"), []byte("binary-linux"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Literal config file
+	if err := os.WriteFile(filepath.Join(etcDir, "config.conf"), []byte("config-data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	resolved := []ResolvedItem{
+		{Original: "bin/myapp.{platform}", Resolved: "bin/myapp.linux-arm64", PackPath: "bin/myapp"},
+		{Original: "etc/config.conf", Resolved: "etc/config.conf", PackPath: "etc/config.conf"},
+	}
+
+	entries, err := CollectFilesResolved(dir, resolved)
+	if err != nil {
+		t.Fatalf("CollectFilesResolved returned error: %v", err)
+	}
+
+	if len(entries) != 2 {
+		t.Fatalf("len(entries) = %d, want 2", len(entries))
+	}
+
+	// Check that RelPath uses PackPath (marker stripped)
+	pathMap := make(map[string]*FileEntry)
+	for i := range entries {
+		pathMap[entries[i].RelPath] = &entries[i]
+	}
+
+	// Should be "bin/myapp" (stripped), NOT "bin/myapp.linux-arm64"
+	if _, ok := pathMap["bin/myapp"]; !ok {
+		t.Error("missing bin/myapp (should have PackPath, not resolved path)")
+	}
+	if _, ok := pathMap["etc/config.conf"]; !ok {
+		t.Error("missing etc/config.conf")
+	}
+
+	// Should NOT have the platform-suffixed path in RelPath
+	if _, ok := pathMap["bin/myapp.linux-arm64"]; ok {
+		t.Error("should not have bin/myapp.linux-arm64 in RelPath - marker should be stripped")
+	}
+}

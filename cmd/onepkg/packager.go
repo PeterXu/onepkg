@@ -101,6 +101,76 @@ func CollectFiles(configDir string, items []string) ([]FileEntry, error) {
 	return entries, nil
 }
 
+// CollectFilesResolved collects files from resolved items.
+// It reads files from Resolved paths but packs them with PackPath (marker stripped).
+func CollectFilesResolved(configDir string, items []ResolvedItem) ([]FileEntry, error) {
+	var entries []FileEntry
+	for _, item := range items {
+		cleanResolved := strings.TrimRight(item.Resolved, "/")
+		cleanPackPath := strings.TrimRight(item.PackPath, "/")
+		fullPath := filepath.Join(configDir, cleanResolved)
+
+		info, err := os.Stat(fullPath)
+		if err != nil {
+			return nil, fmt.Errorf("stat %s: %w", item.Resolved, err)
+		}
+
+		if info.IsDir() {
+			err = filepath.WalkDir(fullPath, func(path string, d fs.DirEntry, walkErr error) error {
+				if walkErr != nil {
+					return walkErr
+				}
+				if d.IsDir() {
+					return nil
+				}
+				// Calculate relative path from the resolved directory
+				relToResolved, err := filepath.Rel(fullPath, path)
+				if err != nil {
+					return err
+				}
+				// Combine with PackPath for the final RelPath
+				packRelPath := filepath.Join(cleanPackPath, relToResolved)
+				entry, err := makeFileEntryWithPackPath(configDir, path, packRelPath)
+				if err != nil {
+					return err
+				}
+				entries = append(entries, entry)
+				return nil
+			})
+			if err != nil {
+				return nil, fmt.Errorf("walk %s: %w", item.Resolved, err)
+			}
+		} else {
+			entry, err := makeFileEntryWithPackPath(configDir, fullPath, cleanPackPath)
+			if err != nil {
+				return nil, err
+			}
+			entries = append(entries, entry)
+		}
+	}
+	return entries, nil
+}
+
+// makeFileEntryWithPackPath creates a FileEntry reading from absPath but using packPath as RelPath.
+func makeFileEntryWithPackPath(configDir, absPath, packPath string) (FileEntry, error) {
+	data, err := os.ReadFile(absPath)
+	if err != nil {
+		return FileEntry{}, fmt.Errorf("read %s: %w", absPath, err)
+	}
+	info, err := os.Stat(absPath)
+	if err != nil {
+		return FileEntry{}, fmt.Errorf("stat %s: %w", absPath, err)
+	}
+	hash := sha1.Sum(data)
+	return FileEntry{
+		RelPath: packPath,
+		AbsPath: absPath,
+		SHA1:    hex.EncodeToString(hash[:]),
+		Mode:    info.Mode(),
+		Size:    info.Size(),
+	}, nil
+}
+
 func makeFileEntry(configDir, relPath string) (FileEntry, error) {
 	absPath := filepath.Join(configDir, relPath)
 	data, err := os.ReadFile(absPath)
