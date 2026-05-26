@@ -125,7 +125,7 @@ items = ["bin/myapp"]
 		t.Errorf("len(Services) = %d, want 0", len(cfg.Services))
 	}
 	if len(cfg.Platforms) != 0 {
-		t.Errorf("len(Platforms) = %d, want 0 (applied as default later)", len(cfg.Platforms))
+		t.Errorf("len(Platforms) = %d, want 0 (must be provided via --platform)", len(cfg.Platforms))
 	}
 }
 
