@@ -39,10 +39,12 @@ after = ["network.target"]
 environment = ["ENV=prod"]
 restart_sec = 5
 limit_nofile = 65535
+working_dir = "/var/lib/myapp"   # or relative: "data" -> /usr/local/{name}/data
 
 [services.macos]                 # launchd (optional)
 run_at_load = true
 keep_alive = true
+working_dir = "/opt/myapp/data"  # or relative: "data" -> /opt/{name}/data
 
 [services.windows]               # Windows Service (optional)
 recovery_delay_ms = 5000
@@ -195,6 +197,8 @@ Examples:
 | `services.args` | `[]` (no arguments) |
 | `services.restart` | `on-failure` |
 | `services.user` | `root` |
+| `services.linux.working_dir` | `""` (none - service uses default) |
+| `services.macos.working_dir` | `""` (none - service uses default) |
 
 ## CLI Usage
 
