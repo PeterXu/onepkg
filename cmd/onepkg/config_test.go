@@ -1062,3 +1062,99 @@ func TestValidateDirs(t *testing.T) {
 		})
 	}
 }
+
+func TestApplyDefaultsDirs(t *testing.T) {
+	tests := []struct {
+		name      string
+		cfg       *Config
+		wantPath  string
+		wantOwner string
+		wantGroup string
+		wantMode  string
+	}{
+		{
+			name: "defaults from service user",
+			cfg: &Config{
+				Name: "myapp", Version: "v1.0.0",
+				Items: []string{"bin/myapp"},
+				Dirs:  []DirConfig{{Path: "/var/log/myapp"}},
+				Services: []ServiceConfig{{Name: "myapp", User: "appuser"}},
+			},
+			wantPath:  "/var/log/myapp",
+			wantOwner: "appuser",
+			wantGroup: "appuser",
+			wantMode:  "0755",
+		},
+		{
+			name: "defaults without service (root)",
+			cfg: &Config{
+				Name: "myapp", Version: "v1.0.0",
+				Items: []string{"bin/myapp"},
+				Dirs:  []DirConfig{{Path: "/var/log/myapp"}},
+			},
+			wantPath:  "/var/log/myapp",
+			wantOwner: "root",
+			wantGroup: "root",
+			wantMode:  "0755",
+		},
+		{
+			name: "explicit owner preserved",
+			cfg: &Config{
+				Name: "myapp", Version: "v1.0.0",
+				Items: []string{"bin/myapp"},
+				Dirs:  []DirConfig{{Path: "/var/log/myapp", Owner: "loguser"}},
+				Services: []ServiceConfig{{Name: "myapp", User: "appuser"}},
+			},
+			wantPath:  "/var/log/myapp",
+			wantOwner: "loguser",
+			wantGroup: "loguser",
+			wantMode:  "0755",
+		},
+		{
+			name: "explicit group preserved",
+			cfg: &Config{
+				Name: "myapp", Version: "v1.0.0",
+				Items: []string{"bin/myapp"},
+				Dirs:  []DirConfig{{Path: "/var/log/myapp", Owner: "loguser", Group: "loggroup"}},
+			},
+			wantPath:  "/var/log/myapp",
+			wantOwner: "loguser",
+			wantGroup: "loggroup",
+			wantMode:  "0755",
+		},
+		{
+			name: "explicit mode preserved",
+			cfg: &Config{
+				Name: "myapp", Version: "v1.0.0",
+				Items: []string{"bin/myapp"},
+				Dirs:  []DirConfig{{Path: "/var/log/myapp", Mode: "0750"}},
+			},
+			wantPath:  "/var/log/myapp",
+			wantOwner: "root",
+			wantGroup: "root",
+			wantMode:  "0750",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.cfg.ApplyDefaults()
+			if len(tt.cfg.Dirs) != 1 {
+				t.Fatalf("len(Dirs) = %d, want 1", len(tt.cfg.Dirs))
+			}
+			d := tt.cfg.Dirs[0]
+			if d.Path != tt.wantPath {
+				t.Errorf("Path = %q, want %q", d.Path, tt.wantPath)
+			}
+			if d.Owner != tt.wantOwner {
+				t.Errorf("Owner = %q, want %q", d.Owner, tt.wantOwner)
+			}
+			if d.Group != tt.wantGroup {
+				t.Errorf("Group = %q, want %q", d.Group, tt.wantGroup)
+			}
+			if d.Mode != tt.wantMode {
+				t.Errorf("Mode = %q, want %q", d.Mode, tt.wantMode)
+			}
+		})
+	}
+}

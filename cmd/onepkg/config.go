@@ -91,6 +91,22 @@ func (c *Config) ApplyDefaults() {
 			}
 		}
 	}
+	// Dirs defaults
+	defaultUser := "root"
+	if len(c.Services) > 0 && c.Services[0].User != "" {
+		defaultUser = c.Services[0].User
+	}
+	for i := range c.Dirs {
+		if c.Dirs[i].Owner == "" {
+			c.Dirs[i].Owner = defaultUser
+		}
+		if c.Dirs[i].Group == "" {
+			c.Dirs[i].Group = c.Dirs[i].Owner
+		}
+		if c.Dirs[i].Mode == "" {
+			c.Dirs[i].Mode = "0755"
+		}
+	}
 }
 
 func (c *Config) Validate(configDir string) error {
