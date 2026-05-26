@@ -209,6 +209,17 @@ func BuildForPlatform(cfg *Config, platform string, entries []FileEntry, tarData
 		expectedArch = "aarch64"
 	}
 
+	// Convert DirConfig to DirSpec
+	var dirs []installer.DirSpec
+	for _, dir := range cfg.Dirs {
+		dirs = append(dirs, installer.DirSpec{
+			Path:  dir.Path,
+			Owner: dir.Owner,
+			Group: dir.Group,
+			Mode:  dir.Mode,
+		})
+	}
+
 	shellCfg := installer.ShellConfig{
 		Name:           cfg.Name,
 		Version:        cfg.Version,
@@ -220,6 +231,7 @@ func BuildForPlatform(cfg *Config, platform string, entries []FileEntry, tarData
 		ServiceContent: base64.StdEncoding.EncodeToString([]byte(serviceContent)),
 		ServiceType:    serviceType,
 		ServiceName:    serviceName,
+		Dirs:           dirs,
 	}
 
 	script, err := installer.GenerateShellInstaller(shellCfg)

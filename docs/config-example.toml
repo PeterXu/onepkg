@@ -39,6 +39,16 @@ items = [
   "data/",                 # directory (recursive, same for all platforms)
 ]
 
+# Optional: directories to create at install time
+# Absolute paths are created as-is. Relative paths are created inside the install directory.
+# Directories are created with proper ownership and permissions.
+# External directories (e.g., /var/log/myapp) are NOT removed on uninstall.
+dirs = [
+  { path = "/var/log/myapp", owner = "myapp", mode = "0755" },  # external log directory
+  { path = "data", owner = "myapp", mode = "0750" },             # relative -> inside install dir (e.g., /usr/local/myapp/data)
+  { path = "/var/lib/myapp" },                                    # minimal: defaults to owner=root, mode=0755
+]
+
 # Optional: service definitions (MVP: only the first [[services]] entry is used)
 # Multiple services are supported in config but post-MVP for installer generation.
 [[services]]

@@ -25,6 +25,15 @@ items = [
   "data/",                   # directory (recursive)
 ]
 
+# Directories to create at install time (optional)
+# Absolute paths created as-is, relative paths inside install directory
+# External directories preserved on uninstall
+dirs = [
+  { path = "/var/log/myapp", owner = "myapp", mode = "0755" },
+  { path = "data", owner = "myapp", mode = "0750" },
+  { path = "/var/lib/myapp" },   # minimal: owner defaults to service user or root
+]
+
 # Services (optional, omit for no service)
 [[services]]
 name = "main"                    # default: package name
@@ -183,6 +192,9 @@ Examples:
 - Service `exec` references existing item (use stripped path, no `{platform}` marker in exec)
 - Platform-specific files exist for each requested platform (fail fast, no fallback)
 - `name` doesn't conflict with reserved names
+- `dirs` paths: no traversal (`..`), no critical system paths (`/etc/passwd`, `/root`, `/boot`, `/sys`, `/proc`, `/dev`)
+- `dirs` mode: valid octal format (`0[0-7]{3,4}`, e.g., `0755`)
+- `dirs` owner/group: alphanumeric, hyphens, underscores only
 
 ## Default Values
 
@@ -199,6 +211,9 @@ Examples:
 | `services.user` | `root` |
 | `services.linux.working_dir` | Install directory (e.g., `/usr/local/{name}`) |
 | `services.macos.working_dir` | Install directory (e.g., `/opt/{name}`) |
+| `dirs.owner` | Service user or `root` |
+| `dirs.group` | Same as `dirs.owner` |
+| `dirs.mode` | `0755` |
 
 ## CLI Usage
 
