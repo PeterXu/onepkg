@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -132,5 +133,134 @@ func TestParseConfigFileNotFound(t *testing.T) {
 	_, err := ParseConfig("/nonexistent/config.toml")
 	if err == nil {
 		t.Error("expected error for nonexistent file")
+	}
+}
+
+func TestApplyDefaults(t *testing.T) {
+	cfg := &Config{
+		Name:    "myapp",
+		Version: "v1.0.0",
+		Items:   []string{"bin/myapp"},
+		Services: []ServiceConfig{
+			{Exec: "bin/myapp"},
+		},
+	}
+
+	cfg.ApplyDefaults()
+
+	if cfg.OutputDir != "packages" {
+		t.Errorf("OutputDir = %q, want %q", cfg.OutputDir, "packages")
+	}
+	if len(cfg.Platforms) != 1 {
+		t.Fatalf("len(Platforms) = %d, want 1", len(cfg.Platforms))
+	}
+	svc := cfg.Services[0]
+	if svc.Name != "myapp" {
+		t.Errorf("Services[0].Name = %q, want %q (package name)", svc.Name, "myapp")
+	}
+	if svc.Restart != "on-failure" {
+		t.Errorf("Services[0].Restart = %q, want %q", svc.Restart, "on-failure")
+	}
+	if svc.User != "root" {
+		t.Errorf("Services[0].User = %q, want %q", svc.User, "root")
+	}
+}
+
+func TestValidate(t *testing.T) {
+	dir := t.TempDir()
+	binDir := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(binDir, "myapp"), []byte("#!/bin/sh"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name    string
+		cfg     *Config
+		wantErr string
+	}{
+		{
+			name: "valid config",
+			cfg: &Config{
+				Name:    "myapp",
+				Version: "v1.0.0",
+				Items:   []string{"bin/myapp"},
+				Services: []ServiceConfig{
+					{Name: "myapp", Exec: "bin/myapp"},
+				},
+			},
+			wantErr: "",
+		},
+		{
+			name:    "empty name",
+			cfg:     &Config{Name: "", Version: "v1.0.0", Items: []string{"bin/myapp"}},
+			wantErr: "name is required",
+		},
+		{
+			name:    "empty version",
+			cfg:     &Config{Name: "myapp", Version: "", Items: []string{"bin/myapp"}},
+			wantErr: "version is required",
+		},
+		{
+			name:    "empty items",
+			cfg:     &Config{Name: "myapp", Version: "v1.0.0", Items: []string{}},
+			wantErr: "at least one item is required",
+		},
+		{
+			name:    "path traversal prefix",
+			cfg:     &Config{Name: "myapp", Version: "v1.0.0", Items: []string{"../../../etc/passwd"}},
+			wantErr: "path traversal",
+		},
+		{
+			name:    "path traversal mid path",
+			cfg:     &Config{Name: "myapp", Version: "v1.0.0", Items: []string{"foo/../../etc/passwd"}},
+			wantErr: "path traversal",
+		},
+		{
+			name:    "dotdot in filename allowed",
+			cfg:     &Config{Name: "myapp", Version: "v1.0.0", Items: []string{"bin/my..app"}},
+			wantErr: "does not exist",
+		},
+		{
+			name:    "absolute path",
+			cfg:     &Config{Name: "myapp", Version: "v1.0.0", Items: []string{"/etc/passwd"}},
+			wantErr: "absolute path",
+		},
+		{
+			name: "missing item file",
+			cfg: &Config{
+				Name: "myapp", Version: "v1.0.0",
+				Items: []string{"bin/nonexistent"},
+			},
+			wantErr: "does not exist",
+		},
+		{
+			name: "service exec not in items",
+			cfg: &Config{
+				Name: "myapp", Version: "v1.0.0",
+				Items:    []string{"bin/myapp"},
+				Services: []ServiceConfig{{Name: "myapp", Exec: "bin/other"}},
+			},
+			wantErr: "service exec \"bin/other\" not found in items",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.cfg.Validate(dir)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Errorf("Validate() returned unexpected error: %v", err)
+				}
+			} else {
+				if err == nil {
+					t.Errorf("Validate() returned nil, want error containing %q", tt.wantErr)
+				} else if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("Validate() error = %q, want error containing %q", err.Error(), tt.wantErr)
+				}
+			}
+		})
 	}
 }

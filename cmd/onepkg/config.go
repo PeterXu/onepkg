@@ -2,6 +2,10 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -41,4 +45,75 @@ func ParseConfig(path string) (*Config, error) {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
 	return &cfg, nil
+}
+
+func (c *Config) ApplyDefaults() {
+	if c.OutputDir == "" {
+		c.OutputDir = "packages"
+	}
+	if len(c.Platforms) == 0 {
+		c.Platforms = []string{runtime.GOOS + "-" + runtime.GOARCH}
+	}
+	for i := range c.Services {
+		if c.Services[i].Name == "" {
+			c.Services[i].Name = c.Name
+		}
+		if c.Services[i].Restart == "" {
+			c.Services[i].Restart = "on-failure"
+		}
+		if c.Services[i].User == "" {
+			c.Services[i].User = "root"
+		}
+		if c.Services[i].Exec == "" {
+			for _, item := range c.Items {
+				if strings.HasPrefix(item, "bin/") {
+					c.Services[i].Exec = item
+					break
+				}
+			}
+		}
+	}
+}
+
+func (c *Config) Validate(configDir string) error {
+	if c.Name == "" {
+		return fmt.Errorf("name is required")
+	}
+	if c.Version == "" {
+		return fmt.Errorf("version is required")
+	}
+	if len(c.Items) == 0 {
+		return fmt.Errorf("at least one item is required")
+	}
+	for _, item := range c.Items {
+		if strings.Contains(item, "/..") || strings.HasPrefix(item, "..") {
+			return fmt.Errorf("path traversal not allowed in item %q", item)
+		}
+		if filepath.IsAbs(item) {
+			return fmt.Errorf("absolute path not allowed in item %q", item)
+		}
+		fullPath := filepath.Join(configDir, item)
+		if _, err := os.Stat(fullPath); err != nil {
+			return fmt.Errorf("item %q does not exist", item)
+		}
+	}
+	itemSet := make(map[string]bool, len(c.Items))
+	for _, item := range c.Items {
+		itemSet[item] = true
+	}
+	for _, svc := range c.Services {
+		if svc.Exec != "" && !itemSet[svc.Exec] {
+			matched := false
+			for _, item := range c.Items {
+				if strings.HasPrefix(svc.Exec, item) {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				return fmt.Errorf("service exec %q not found in items", svc.Exec)
+			}
+		}
+	}
+	return nil
 }
