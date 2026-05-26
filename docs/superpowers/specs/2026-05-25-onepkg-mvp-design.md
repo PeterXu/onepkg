@@ -7,12 +7,11 @@ A general-purpose self-extracting installer generator that reads `config.toml` a
 ```toml
 name = "autotest"
 version = "v1.0.0"
-platforms = ["linux-arm64", "linux-amd64", "darwin-arm64"]
 output_dir = "packages"
 
 items = [
   "bin/test1",
-  "bin/test2",
+  "bin/test2.{platform}",
   "etc/gate.conf",
   "data/",
   "res/",
@@ -38,12 +37,37 @@ keep_alive = true
 
 | Field | Default |
 |-------|---------|
-| `platforms` | Current build platform only |
 | `output_dir` | `packages` |
 | `services.name` | Package `name` |
 | `services.exec` | First `bin/*` item |
 | `services.restart` | `on-failure` |
 | `services.user` | `root` |
+
+### Platform Resolution
+
+Items can include a `{platform}` marker to reference platform-specific files. This allows a single config to reference different binaries for different platforms.
+
+**Marker syntax:**
+- Items may contain `{platform}` in the path: `bin/myapp.{platform}`
+- The marker resolves to the target platform suffix: `bin/myapp.linux-arm64`
+- The file is packed with the marker stripped: `bin/myapp`
+
+**Resolution process:**
+1. Replace `{platform}` with the target platform (e.g., `linux-arm64`)
+2. Verify the resolved path exists on disk
+3. Pack the file with the marker stripped from the destination path
+
+**Example:**
+```toml
+items = [
+  "bin/myapp.{platform}",  # Resolves to bin/myapp.linux-arm64, packed as bin/myapp
+  "etc/config.yaml",       # Platform-agnostic file, no marker needed
+]
+```
+
+**Error handling:**
+- If a resolved platform-specific path does not exist, the build fails
+- No fallback mechanism - each platform requires the exact file specified
 
 ### Validation (before packaging)
 
@@ -71,8 +95,9 @@ Go module: `module onepkg`, `go 1.21`. Dependency: `github.com/BurntSushi/toml`.
 ## Packaging Flow
 
 1. Parse `config.toml`, apply defaults, validate
-2. For each target platform:
-   - Walk all `items` (files and directories), collect file paths relative to config directory
+2. For each target platform (from `--platform` CLI flag):
+   - Resolve `{platform}` markers in items to platform-specific paths
+   - Walk all items (files and directories), collect file paths relative to config directory
    - Compute SHA1 checksum for each file
    - Generate `VERSION` file content (TOML format)
    - Generate systemd unit or launchd plist from service config
@@ -181,18 +206,20 @@ Files are embedded as base64 and decoded on install. File permissions are preser
 ## CLI Usage
 
 ```bash
-# Build for all platforms listed in config
-onepkg -c config.toml
-
-# Build for specific platform
+# Build for a specific platform (required)
 onepkg -c config.toml --platform linux-arm64
 
-# Build for multiple platforms
-onepkg -c config.toml --platforms linux-arm64,darwin-arm64
+# Build for multiple platforms (comma-separated)
+onepkg -c config.toml --platform linux-arm64,darwin-arm64
 
 # Specify output directory (overrides config)
-onepkg -c config.toml --output ./dist
+onepkg -c config.toml --platform linux-arm64 --output ./dist
+
+# Show help
+onepkg --help
 ```
+
+**Note:** `--platform` is required. The config file no longer specifies a platforms list; each build explicitly declares its target platform(s).
 
 ## Post-MVP (deferred)
 
