@@ -910,3 +910,155 @@ items = ["bin/myapp"]
 		t.Errorf("len(Dirs) = %d, want 0 (no dirs field)", len(cfg.Dirs))
 	}
 }
+
+func TestValidateDirs(t *testing.T) {
+	dir := t.TempDir()
+	binDir := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(binDir, "myapp"), []byte("#!/bin/sh"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name    string
+		cfg     *Config
+		wantErr string
+	}{
+		{
+			name: "valid absolute path",
+			cfg: &Config{
+				Name: "myapp", Version: "v1.0.0",
+				Items: []string{"bin/myapp"},
+				Dirs:  []DirConfig{{Path: "/var/log/myapp"}},
+			},
+			wantErr: "",
+		},
+		{
+			name: "valid relative path",
+			cfg: &Config{
+				Name: "myapp", Version: "v1.0.0",
+				Items: []string{"bin/myapp"},
+				Dirs:  []DirConfig{{Path: "data"}},
+			},
+			wantErr: "",
+		},
+		{
+			name: "path traversal absolute",
+			cfg: &Config{
+				Name: "myapp", Version: "v1.0.0",
+				Items: []string{"bin/myapp"},
+				Dirs:  []DirConfig{{Path: "/var/../etc/passwd"}},
+			},
+			wantErr: "path traversal",
+		},
+		{
+			name: "path traversal relative",
+			cfg: &Config{
+				Name: "myapp", Version: "v1.0.0",
+				Items: []string{"bin/myapp"},
+				Dirs:  []DirConfig{{Path: "../etc/passwd"}},
+			},
+			wantErr: "path traversal",
+		},
+		{
+			name: "critical path /root",
+			cfg: &Config{
+				Name: "myapp", Version: "v1.0.0",
+				Items: []string{"bin/myapp"},
+				Dirs:  []DirConfig{{Path: "/root"}},
+			},
+			wantErr: "critical system path",
+		},
+		{
+			name: "critical path /etc/passwd",
+			cfg: &Config{
+				Name: "myapp", Version: "v1.0.0",
+				Items: []string{"bin/myapp"},
+				Dirs:  []DirConfig{{Path: "/etc/passwd"}},
+			},
+			wantErr: "critical system path",
+		},
+		{
+			name: "critical path under /sys",
+			cfg: &Config{
+				Name: "myapp", Version: "v1.0.0",
+				Items: []string{"bin/myapp"},
+				Dirs:  []DirConfig{{Path: "/sys/class"}},
+			},
+			wantErr: "critical system path",
+		},
+		{
+			name: "valid /etc/myapp allowed",
+			cfg: &Config{
+				Name: "myapp", Version: "v1.0.0",
+				Items: []string{"bin/myapp"},
+				Dirs:  []DirConfig{{Path: "/etc/myapp"}},
+			},
+			wantErr: "",
+		},
+		{
+			name: "valid /var/log/myapp allowed",
+			cfg: &Config{
+				Name: "myapp", Version: "v1.0.0",
+				Items: []string{"bin/myapp"},
+				Dirs:  []DirConfig{{Path: "/var/log/myapp"}},
+			},
+			wantErr: "",
+		},
+		{
+			name: "empty path rejected",
+			cfg: &Config{
+				Name: "myapp", Version: "v1.0.0",
+				Items: []string{"bin/myapp"},
+				Dirs:  []DirConfig{{Path: ""}},
+			},
+			wantErr: "path is required",
+		},
+		{
+			name: "invalid mode format",
+			cfg: &Config{
+				Name: "myapp", Version: "v1.0.0",
+				Items: []string{"bin/myapp"},
+				Dirs:  []DirConfig{{Path: "/var/log/myapp", Mode: "755"}},
+			},
+			wantErr: "invalid mode",
+		},
+		{
+			name: "valid mode 0755",
+			cfg: &Config{
+				Name: "myapp", Version: "v1.0.0",
+				Items: []string{"bin/myapp"},
+				Dirs:  []DirConfig{{Path: "/var/log/myapp", Mode: "0755"}},
+			},
+			wantErr: "",
+		},
+		{
+			name: "valid mode 0750",
+			cfg: &Config{
+				Name: "myapp", Version: "v1.0.0",
+				Items: []string{"bin/myapp"},
+				Dirs:  []DirConfig{{Path: "/var/log/myapp", Mode: "0750"}},
+			},
+			wantErr: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.cfg.Validate(dir)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Errorf("Validate() returned unexpected error: %v", err)
+				}
+			} else {
+				if err == nil {
+					t.Errorf("Validate() returned nil, want error containing %q", tt.wantErr)
+				} else if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("Validate() error = %q, want error containing %q", err.Error(), tt.wantErr)
+				}
+			}
+		})
+	}
+}

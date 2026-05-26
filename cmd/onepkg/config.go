@@ -152,6 +152,32 @@ func (c *Config) Validate(configDir string) error {
 			}
 		}
 	}
+	// Dirs validation
+	for _, d := range c.Dirs {
+		if d.Path == "" {
+			return fmt.Errorf("dirs path is required")
+		}
+		// Check path traversal - look for ".." in original path before cleaning
+		if strings.Contains(d.Path, "..") {
+			return fmt.Errorf("path traversal not allowed in dirs path %q", d.Path)
+		}
+		cleanPath := filepath.Clean(d.Path)
+		// Check critical system paths (only for absolute paths)
+		if filepath.IsAbs(d.Path) && isCriticalPath(cleanPath) {
+			return fmt.Errorf("critical system path not allowed: %q", d.Path)
+		}
+		// Validate mode if specified
+		if d.Mode != "" && !isValidMode(d.Mode) {
+			return fmt.Errorf("invalid mode %q for dirs path %q (must be octal like 0755)", d.Mode, d.Path)
+		}
+		// Validate owner/group if specified
+		if d.Owner != "" && !isValidName(d.Owner) {
+			return fmt.Errorf("invalid owner %q for dirs path %q", d.Owner, d.Path)
+		}
+		if d.Group != "" && !isValidName(d.Group) {
+			return fmt.Errorf("invalid group %q for dirs path %q", d.Group, d.Path)
+		}
+	}
 	return nil
 }
 
@@ -162,6 +188,49 @@ func isValidName(name string) bool {
 		}
 	}
 	return len(name) > 0
+}
+
+// criticalPaths is a blacklist of system paths that must never be created by installers
+var criticalPaths = map[string]bool{
+	"/etc/passwd":  true,
+	"/etc/shadow":  true,
+	"/etc/sudoers": true,
+	"/root":        true,
+	"/boot":        true,
+	"/sys":         true,
+	"/proc":        true,
+	"/dev":         true,
+}
+
+// isCriticalPath checks if a path is a critical system path or under one
+func isCriticalPath(path string) bool {
+	// Check exact match
+	if criticalPaths[path] {
+		return true
+	}
+	// Check if path is under a critical directory
+	for critical := range criticalPaths {
+		if strings.HasPrefix(path, critical+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// isValidMode checks if mode is a valid octal permission string (0[0-7]{3,4})
+func isValidMode(mode string) bool {
+	if len(mode) < 4 || len(mode) > 5 {
+		return false
+	}
+	if mode[0] != '0' {
+		return false
+	}
+	for _, c := range mode[1:] {
+		if c < '0' || c > '7' {
+			return false
+		}
+	}
+	return true
 }
 
 const PlatformMarker = "{platform}"
