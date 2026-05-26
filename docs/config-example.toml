@@ -1,0 +1,48 @@
+# onepkg config.toml — full example with all supported fields
+
+# Required: package name (used for output filename and default service name)
+name = "myapp"
+
+# Required: semantic version
+version = "v1.2.0"
+
+# Optional: target platforms (defaults to current OS-ARCH if omitted)
+# Format: "{os}-{arch}"
+platforms = [
+  "linux-amd64",
+  "linux-arm64",
+  "darwin-amd64",
+  "darwin-arm64",
+]
+
+# Optional: output directory for generated installers (default: "packages")
+output_dir = "dist"
+
+# Required: files and directories to include in the package
+# Paths are relative to the directory containing this config.toml.
+# Directories are included recursively.
+items = [
+  "bin/myapp",          # binary
+  "bin/helper",         # additional binary
+  "etc/myapp.conf",     # config file
+  "data/",              # directory (recursive)
+  "res/",               # another directory
+]
+
+# Optional: service definitions (only the first entry is used in MVP)
+[[services]]
+name = "myapp"                # service name (defaults to package name)
+exec = "bin/myapp"            # executable (must appear in items)
+restart = "on-failure"        # restart policy (default: "on-failure")
+user = "myapp"                # run-as user (default: "root")
+
+# Linux-specific (systemd) settings
+[services.linux]
+type = "simple"               # service type (default: "simple")
+after = ["network.target", "syslog.target"]  # start after these targets
+restart_sec = 5               # seconds between restart attempts
+
+# macOS-specific (launchd) settings
+[services.macos]
+run_at_load = true            # start on boot
+keep_alive = true             # restart on exit
