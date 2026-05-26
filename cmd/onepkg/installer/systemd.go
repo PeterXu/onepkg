@@ -19,6 +19,14 @@ type SystemdConfig struct {
 	LimitNOFILE int
 }
 
+// systemdEscapeValue escapes characters that have special meaning in systemd Environment values.
+// Double quotes and backslashes must be escaped within quoted values.
+func systemdEscapeValue(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	return s
+}
+
 func GenerateSystemdUnit(cfg SystemdConfig) string {
 	var b strings.Builder
 
@@ -48,7 +56,7 @@ func GenerateSystemdUnit(cfg SystemdConfig) string {
 		fmt.Fprintf(&b, "WorkingDirectory=%s\n", cfg.WorkingDir)
 	}
 	for key, value := range cfg.Environment {
-		fmt.Fprintf(&b, `Environment="%s=%s"`+"\n", key, value)
+		fmt.Fprintf(&b, `Environment="%s=%s"`+"\n", systemdEscapeValue(key), systemdEscapeValue(value))
 	}
 	if cfg.LimitNOFILE > 0 {
 		fmt.Fprintf(&b, "LimitNOFILE=%d\n", cfg.LimitNOFILE)

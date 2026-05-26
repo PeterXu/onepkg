@@ -221,3 +221,59 @@ func TestGenerateLaunchdPlistWithoutLimitNOFILE(t *testing.T) {
 		t.Error("should not contain ResourceLimits when not set")
 	}
 }
+
+func TestGenerateLaunchdPlistWithXMLSpecialChars(t *testing.T) {
+	cfg := LaunchdConfig{
+		Name:        "my<app>",
+		Exec:        "/opt/myapp/bin/myapp",
+		User:        "user&name",
+		Environment: map[string]string{"LOG_LEVEL": "</string><key>Label</key><string>evil"},
+	}
+
+	output := GenerateLaunchdPlist(cfg)
+
+	// XML special characters should be escaped
+	if strings.Contains(output, "my<app>") {
+		t.Error("Name with < > should be escaped")
+	}
+	if !strings.Contains(output, "my&lt;app&gt;") {
+		t.Error("Name should have escaped XML entities")
+	}
+	if strings.Contains(output, "user&name") {
+		t.Error("User with & should be escaped")
+	}
+	if !strings.Contains(output, "user&amp;name") {
+		t.Error("User should have escaped & entity")
+	}
+	// XML injection should be prevented - the injected evil string should be escaped
+	// The injection attempt should appear as escaped: &lt;/string&gt;&lt;key&gt;Label&lt;/key&gt;
+	if strings.Contains(output, "<key>Label</key><string>evil") {
+		t.Error("XML injection through Environment value should be prevented")
+	}
+	if !strings.Contains(output, "&lt;/string&gt;&lt;key&gt;Label") {
+		t.Error("Environment value should be properly escaped")
+	}
+}
+
+func TestXmlEscape(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"normal", "normal"},
+		{"<tag>", "&lt;tag&gt;"},
+		{"&amp", "&amp;amp"},   // & -> &amp;, so &amp -> &amp;amp
+		{"\"quoted\"", "&quot;quoted&quot;"},
+		{"'single'", "&apos;single&apos;"},
+		{"all<>&\"'", "all&lt;&gt;&amp;&quot;&apos;"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := xmlEscape(tt.input)
+			if result != tt.expected {
+				t.Errorf("xmlEscape(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}

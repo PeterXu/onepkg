@@ -194,3 +194,49 @@ func TestGenerateSystemdUnitWithoutLimitNOFILE(t *testing.T) {
 		t.Error("should not contain LimitNOFILE when not set")
 	}
 }
+
+func TestGenerateSystemdUnitWithSpecialCharsInEnvironment(t *testing.T) {
+	cfg := SystemdConfig{
+		Name:        "myapp",
+		Exec:        "/usr/local/myapp/bin/myapp",
+		Restart:     "on-failure",
+		User:        "root",
+		Environment: map[string]string{"LOG_LEVEL": "info\"; malicious=bad", "PATH": "C:\\Users\\app"},
+	}
+
+	output := GenerateSystemdUnit(cfg)
+
+	// The output should have escaped quotes: Environment="LOG_LEVEL=info\"; malicious=bad"
+	// Quote is escaped as \", preventing directive injection
+	expectedEnv := `Environment="LOG_LEVEL=info\"; malicious=bad"`
+	if !strings.Contains(output, expectedEnv) {
+		t.Errorf("output missing properly escaped Environment\nexpected: %s\nfull output:\n%s", expectedEnv, output)
+	}
+	// Backslashes should be escaped (C:\Users\app -> C:\\Users\\app)
+	expectedPath := `Environment="PATH=C:\\Users\\app"`
+	if !strings.Contains(output, expectedPath) {
+		t.Errorf("output missing properly escaped PATH\nexpected: %s\nfull output:\n%s", expectedPath, output)
+	}
+}
+
+func TestSystemdEscapeValue(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"normal", "normal"},
+		{"has\"quote", "has\\\"quote"},      // quote -> \"
+		{"back\\slash", "back\\\\slash"},    // backslash -> \\
+		{"both\\\"chars", "both\\\\\\\"chars"}, // both -> \\ then \"
+		{"multiple\"\"quotes", "multiple\\\"\\\"quotes"}, // quotes -> \" \"
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := systemdEscapeValue(tt.input)
+			if result != tt.expected {
+				t.Errorf("systemdEscapeValue(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}

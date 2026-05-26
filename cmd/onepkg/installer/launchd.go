@@ -17,6 +17,16 @@ type LaunchdConfig struct {
 	LimitNOFILE int
 }
 
+// xmlEscape escapes the 5 XML entities: &, <, >, ", '
+func xmlEscape(s string) string {
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	s = strings.ReplaceAll(s, "\"", "&quot;")
+	s = strings.ReplaceAll(s, "'", "&apos;")
+	return s
+}
+
 func GenerateLaunchdPlist(cfg LaunchdConfig) string {
 	var b strings.Builder
 
@@ -28,20 +38,20 @@ func GenerateLaunchdPlist(cfg LaunchdConfig) string {
 	b.WriteString("\n<dict>\n")
 
 	fmt.Fprintf(&b, "\t<key>Label</key>\n")
-	fmt.Fprintf(&b, "\t<string>com.%s</string>\n", cfg.Name)
+	fmt.Fprintf(&b, "\t<string>com.%s</string>\n", xmlEscape(cfg.Name))
 
 	// Use ProgramArguments if args are provided, otherwise use simpler Program key
 	if len(cfg.Args) > 0 {
 		fmt.Fprintf(&b, "\t<key>ProgramArguments</key>\n")
 		fmt.Fprintf(&b, "\t<array>\n")
-		fmt.Fprintf(&b, "\t\t<string>%s</string>\n", cfg.Exec) // binary is first argument
+		fmt.Fprintf(&b, "\t\t<string>%s</string>\n", xmlEscape(cfg.Exec)) // binary is first argument
 		for _, arg := range cfg.Args {
-			fmt.Fprintf(&b, "\t\t<string>%s</string>\n", arg)
+			fmt.Fprintf(&b, "\t\t<string>%s</string>\n", xmlEscape(arg))
 		}
 		fmt.Fprintf(&b, "\t</array>\n")
 	} else {
 		fmt.Fprintf(&b, "\t<key>Program</key>\n")
-		fmt.Fprintf(&b, "\t<string>%s</string>\n", cfg.Exec)
+		fmt.Fprintf(&b, "\t<string>%s</string>\n", xmlEscape(cfg.Exec))
 	}
 
 	if cfg.RunAtLoad {
@@ -55,19 +65,19 @@ func GenerateLaunchdPlist(cfg LaunchdConfig) string {
 	}
 
 	fmt.Fprintf(&b, "\t<key>UserName</key>\n")
-	fmt.Fprintf(&b, "\t<string>%s</string>\n", cfg.User)
+	fmt.Fprintf(&b, "\t<string>%s</string>\n", xmlEscape(cfg.User))
 
 	if cfg.WorkingDir != "" {
 		fmt.Fprintf(&b, "\t<key>WorkingDirectory</key>\n")
-		fmt.Fprintf(&b, "\t<string>%s</string>\n", cfg.WorkingDir)
+		fmt.Fprintf(&b, "\t<string>%s</string>\n", xmlEscape(cfg.WorkingDir))
 	}
 
 	if len(cfg.Environment) > 0 {
 		fmt.Fprintf(&b, "\t<key>EnvironmentVariables</key>\n")
 		fmt.Fprintf(&b, "\t<dict>\n")
 		for key, value := range cfg.Environment {
-			fmt.Fprintf(&b, "\t\t<key>%s</key>\n", key)
-			fmt.Fprintf(&b, "\t\t<string>%s</string>\n", value)
+			fmt.Fprintf(&b, "\t\t<key>%s</key>\n", xmlEscape(key))
+			fmt.Fprintf(&b, "\t\t<string>%s</string>\n", xmlEscape(value))
 		}
 		fmt.Fprintf(&b, "\t</dict>\n")
 	}
