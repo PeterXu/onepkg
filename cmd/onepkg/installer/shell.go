@@ -97,14 +97,20 @@ uninstall_service() {
     check_arch
     check_root
 
-    local install_dir="$DEFAULT_DIR"
+    local base_dir="$DEFAULT_DIR"
 
     while [ $# -gt 0 ]; do
         case "$1" in
-            --dir) install_dir="$2"; shift 2 ;;
+            --dir) base_dir="$2"; shift 2 ;;
             *) shift ;;
         esac
     done
+
+    # If custom --dir specified, append package name as subdirectory
+    local install_dir="$base_dir"
+    if [ "$base_dir" != "$DEFAULT_DIR" ]; then
+        install_dir="$base_dir/$PKG_NAME"
+    fi
 
     if [ -d "$install_dir" ] && [ "$(ls -A "$install_dir" 2>/dev/null)" ]; then
         echo "Warning: $install_dir exists and is not empty, replacing files..."
@@ -132,14 +138,20 @@ uninstall_service() {
 cmd_uninstall() {
     check_root
 
-    local install_dir="$DEFAULT_DIR"
+    local base_dir="$DEFAULT_DIR"
 
     while [ $# -gt 0 ]; do
         case "$1" in
-            --dir) install_dir="$2"; shift 2 ;;
+            --dir) base_dir="$2"; shift 2 ;;
             *) shift ;;
         esac
     done
+
+    # If custom --dir specified, append package name as subdirectory
+    local install_dir="$base_dir"
+    if [ "$base_dir" != "$DEFAULT_DIR" ]; then
+        install_dir="$base_dir/$PKG_NAME"
+    fi
 
     echo "Uninstalling $PKG_NAME..."
 
@@ -151,14 +163,20 @@ cmd_uninstall() {
 }
 
 cmd_version() {
-    local install_dir="$DEFAULT_DIR"
+    local base_dir="$DEFAULT_DIR"
 
     while [ $# -gt 0 ]; do
         case "$1" in
-            --dir) install_dir="$2"; shift 2 ;;
+            --dir) base_dir="$2"; shift 2 ;;
             *) shift ;;
         esac
     done
+
+    # If custom --dir specified, append package name as subdirectory
+    local install_dir="$base_dir"
+    if [ "$base_dir" != "$DEFAULT_DIR" ]; then
+        install_dir="$base_dir/$PKG_NAME"
+    fi
 
     if [ -f "$install_dir/VERSION" ]; then
         cat "$install_dir/VERSION"
@@ -169,14 +187,20 @@ cmd_version() {
 }
 
 cmd_list() {
-    local install_dir="$DEFAULT_DIR"
+    local base_dir="$DEFAULT_DIR"
 
     while [ $# -gt 0 ]; do
         case "$1" in
-            --dir) install_dir="$2"; shift 2 ;;
+            --dir) base_dir="$2"; shift 2 ;;
             *) shift ;;
         esac
     done
+
+    # If custom --dir specified, append package name as subdirectory
+    local install_dir="$base_dir"
+    if [ "$base_dir" != "$DEFAULT_DIR" ]; then
+        install_dir="$base_dir/$PKG_NAME"
+    fi
 
     if [ ! -f "$install_dir/VERSION" ]; then
         echo "$PKG_NAME is not installed"
@@ -199,14 +223,20 @@ cmd_list() {
 }
 
 cmd_verify() {
-    local install_dir="$DEFAULT_DIR"
+    local base_dir="$DEFAULT_DIR"
 
     while [ $# -gt 0 ]; do
         case "$1" in
-            --dir) install_dir="$2"; shift 2 ;;
+            --dir) base_dir="$2"; shift 2 ;;
             *) shift ;;
         esac
     done
+
+    # If custom --dir specified, append package name as subdirectory
+    local install_dir="$base_dir"
+    if [ "$base_dir" != "$DEFAULT_DIR" ]; then
+        install_dir="$base_dir/$PKG_NAME"
+    fi
 
     if [ ! -f "$install_dir/VERSION" ]; then
         echo "$PKG_NAME is not installed"
