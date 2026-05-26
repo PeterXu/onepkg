@@ -197,8 +197,8 @@ Examples:
 | `services.args` | `[]` (no arguments) |
 | `services.restart` | `on-failure` |
 | `services.user` | `root` |
-| `services.linux.working_dir` | `""` (none - service uses default) |
-| `services.macos.working_dir` | `""` (none - service uses default) |
+| `services.linux.working_dir` | Install directory (e.g., `/usr/local/{name}`) |
+| `services.macos.working_dir` | Install directory (e.g., `/opt/{name}`) |
 
 ## CLI Usage
 

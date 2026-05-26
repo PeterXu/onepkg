@@ -46,15 +46,19 @@ type = "simple"               # service type: simple (default), forking, notify,
                               # - exec: like simple but waits until main binary is executed
 after = ["network.target", "syslog.target"]  # start after these systemd targets
 restart_sec = 5               # seconds between restart attempts
-working_dir = "/var/lib/myapp"  # working directory for the service
-                              # relative paths are prepended with install dir (e.g., "data" -> /usr/local/myapp/data)
+working_dir = "/var/lib/myapp"  # working directory for the service (optional)
+                              # Default: install directory (e.g., /usr/local/myapp)
+                              # Relative paths are prepended with install dir (e.g., "data" -> /usr/local/myapp/data)
+                              # Absolute paths override the default (e.g., "/var/lib/myapp")
 
 # macOS-specific (launchd) settings
 [services.macos]
 run_at_load = true            # start on boot
 keep_alive = true             # restart on exit
-working_dir = "/opt/myapp/data"  # working directory for the service
-                              # relative paths are prepended with install dir (e.g., "data" -> /opt/myapp/data)
+working_dir = "/opt/myapp/data"  # working directory for the service (optional)
+                              # Default: install directory (e.g., /opt/myapp)
+                              # Relative paths are prepended with install dir (e.g., "data" -> /opt/myapp/data)
+                              # Absolute paths override the default (e.g., "/opt/myapp/data")
 
 # Example: second service (post-MVP - not yet supported by installer)
 # [[services]]

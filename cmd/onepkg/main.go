@@ -153,7 +153,9 @@ func BuildForPlatform(cfg *Config, platform string, entries []FileEntry, tarData
 			serviceType = "systemd"
 			serviceName = svc.Name + ".service"
 			workingDir := svc.Linux.WorkingDir
-			if workingDir != "" && !filepath.IsAbs(workingDir) {
+			if workingDir == "" {
+				workingDir = defaultDir // default to install directory
+			} else if !filepath.IsAbs(workingDir) {
 				workingDir = filepath.Join(defaultDir, workingDir)
 			}
 			serviceContent = installer.GenerateSystemdUnit(installer.SystemdConfig{
@@ -175,7 +177,9 @@ func BuildForPlatform(cfg *Config, platform string, entries []FileEntry, tarData
 			serviceType = "launchd"
 			serviceName = "com." + svc.Name + ".plist"
 			workingDir := svc.MacOS.WorkingDir
-			if workingDir != "" && !filepath.IsAbs(workingDir) {
+			if workingDir == "" {
+				workingDir = defaultDir // default to install directory
+			} else if !filepath.IsAbs(workingDir) {
 				workingDir = filepath.Join(defaultDir, workingDir)
 			}
 			serviceContent = installer.GenerateLaunchdPlist(installer.LaunchdConfig{
