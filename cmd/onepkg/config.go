@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/BurntSushi/toml"
+	toml "github.com/pelletier/go-toml"
 )
 
 type Config struct {
@@ -56,9 +56,13 @@ type DirConfig struct {
 }
 
 func ParseConfig(path string) (*Config, error) {
-	var cfg Config
-	if _, err := toml.DecodeFile(path, &cfg); err != nil {
+	tree, err := toml.LoadFile(path)
+	if err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
+	}
+	var cfg Config
+	if err := tree.Unmarshal(&cfg); err != nil {
+		return nil, fmt.Errorf("unmarshal config: %w", err)
 	}
 	return &cfg, nil
 }

@@ -4,6 +4,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/pelletier/go-toml"
 )
 
 func TestParseValue(t *testing.T) {
@@ -168,5 +170,47 @@ func TestRunTomlUpdate_Add_ExistingKey(t *testing.T) {
 	want := `name = "updated"`
 	if !strings.Contains(string(data), want) {
 		t.Errorf("file content = %q, want to contain %q", string(data), want)
+	}
+}
+
+func TestRunTomlUpdate_ArrayElement(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.toml"
+	content := `name = "myapp"
+
+[[dirs]]
+path = "/var/log/myapp"
+owner = "root"
+
+[[dirs]]
+path = "/var/lib/myapp"
+owner = "app"
+`
+	os.WriteFile(path, []byte(content), 0644)
+
+	err := runTomlUpdate([]string{"dirs.0.owner", "nobody", path})
+	if err != nil {
+		t.Fatalf("runTomlUpdate: %v", err)
+	}
+
+	tree, _ := toml.LoadFile(path)
+	arr := tree.Get("dirs").([]*toml.Tree)
+	if arr[0].Get("owner") != "nobody" {
+		t.Errorf("dirs.0.owner = %v, want nobody", arr[0].Get("owner"))
+	}
+	if arr[1].Get("owner") != "app" {
+		t.Errorf("dirs.1.owner should be unchanged, got %v", arr[1].Get("owner"))
+	}
+}
+
+func TestRunTomlUpdate_ArrayElementIndexOutOfRange(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.toml"
+	content := "[[dirs]]\npath = \"/var/log\"\n"
+	os.WriteFile(path, []byte(content), 0644)
+
+	err := runTomlUpdate([]string{"dirs.5.path", "/x", path})
+	if err == nil {
+		t.Error("expected error for out-of-range index")
 	}
 }

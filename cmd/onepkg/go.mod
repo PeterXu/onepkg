@@ -2,4 +2,4 @@ module onepkg
 
 go 1.26.3
 
-require github.com/BurntSushi/toml v1.6.0
+require github.com/pelletier/go-toml v1.9.5

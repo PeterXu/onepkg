@@ -6,9 +6,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/BurntSushi/toml"
+	"github.com/pelletier/go-toml"
 )
 
+// ParseValue converts a string input to the appropriate Go type:
+// bool → float64 → int64 → string (fallback)
 func ParseValue(s string) interface{} {
 	if s == "true" {
 		return true
@@ -27,7 +29,17 @@ func ParseValue(s string) interface{} {
 	return s
 }
 
+// runTomlUpdate executes the toml-update subcommand (update-only).
 func runTomlUpdate(args []string) error {
+	return tomlUpdateCore(args, false)
+}
+
+// runTomlUpdateAdd executes the toml-update subcommand with --add (upsert).
+func runTomlUpdateAdd(args []string) error {
+	return tomlUpdateCore(args, true)
+}
+
+func tomlUpdateCore(args []string, allowAdd bool) error {
 	if len(args) < 3 {
 		return fmt.Errorf("usage: onepkg toml-update [--add] <key> <value> <file>")
 	}
@@ -36,117 +48,76 @@ func runTomlUpdate(args []string) error {
 	value := ParseValue(args[1])
 	filePath := args[2]
 
-	// Read and decode the TOML file
-	data, err := os.ReadFile(filePath)
+	tree, err := toml.LoadFile(filePath)
 	if err != nil {
-		return fmt.Errorf("read %s: %w", filePath, err)
+		return fmt.Errorf("load %s: %w", filePath, err)
 	}
 
-	var tree map[string]interface{}
-	metaData, err := toml.Decode(string(data), &tree)
-	if err != nil {
-		return fmt.Errorf("decode %s: %w", filePath, err)
+	if err := setKey(tree, key, value, allowAdd); err != nil {
+		return err
 	}
 
-	// Check if key exists
-	keyParts := strings.Split(key, ".")
-	if !keyExists(tree, keyParts) {
-		return fmt.Errorf("key %q does not exist (use --add to insert)", key)
-	}
-
-	// Set the value
-	setKeyValue(tree, keyParts, value)
-
-	// Encode back to TOML
-	encoded, err := toml.Marshal(tree)
-	if err != nil {
+	var buf strings.Builder
+	if _, err := tree.WriteTo(&buf); err != nil {
 		return fmt.Errorf("encode: %w", err)
 	}
 
-	// Preserve the original metadata for consistent formatting
-	_ = metaData // We'll use this in future for formatting preservation
-
-	if err := os.WriteFile(filePath, encoded, 0644); err != nil {
+	if err := os.WriteFile(filePath, []byte(buf.String()), 0644); err != nil {
 		return fmt.Errorf("write %s: %w", filePath, err)
 	}
 
 	return nil
 }
 
-// keyExists checks if a nested key exists in the tree
-func keyExists(tree map[string]interface{}, keyParts []string) bool {
-	if len(keyParts) == 0 {
-		return true
-	}
+// setKey sets a value at the given dotted key path, handling array indices.
+// Uses an explicit index loop (not for-range) so it can skip array index parts via i++.
+func setKey(tree *toml.Tree, key string, value interface{}, allowAdd bool) error {
+	parts := strings.Split(key, ".")
+	current := interface{}(tree)
 
-	first := keyParts[0]
-	value, exists := tree[first]
-	if !exists {
-		return false
-	}
+	for i := 0; i < len(parts); i++ {
+		part := parts[i]
+		isLast := i == len(parts)-1
 
-	if len(keyParts) == 1 {
-		return true
-	}
-
-	nested, ok := value.(map[string]interface{})
-	if !ok {
-		return false
-	}
-
-	return keyExists(nested, keyParts[1:])
-}
-
-// setKeyValue sets a nested key value in the tree
-func setKeyValue(tree map[string]interface{}, keyParts []string, value interface{}) {
-	if len(keyParts) == 1 {
-		tree[keyParts[0]] = value
-		return
-	}
-
-	first := keyParts[0]
-	nested, ok := tree[first].(map[string]interface{})
-	if !ok {
-		nested = make(map[string]interface{})
-		tree[first] = nested
-	}
-
-	setKeyValue(nested, keyParts[1:], value)
-}
-
-func runTomlUpdateAdd(args []string) error {
-	if len(args) < 3 {
-		return fmt.Errorf("usage: onepkg toml-update --add <key> <value> <file>")
-	}
-
-	key := args[0]
-	value := ParseValue(args[1])
-	filePath := args[2]
-
-	// Read and decode the TOML file
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		return fmt.Errorf("read %s: %w", filePath, err)
-	}
-
-	var tree map[string]interface{}
-	_, err = toml.Decode(string(data), &tree)
-	if err != nil {
-		return fmt.Errorf("decode %s: %w", filePath, err)
-	}
-
-	// Set the value (create key if it doesn't exist)
-	keyParts := strings.Split(key, ".")
-	setKeyValue(tree, keyParts, value)
-
-	// Encode back to TOML
-	encoded, err := toml.Marshal(tree)
-	if err != nil {
-		return fmt.Errorf("encode: %w", err)
-	}
-
-	if err := os.WriteFile(filePath, encoded, 0644); err != nil {
-		return fmt.Errorf("write %s: %w", filePath, err)
+		switch v := current.(type) {
+		case *toml.Tree:
+			if isLast {
+				if !v.Has(part) && !allowAdd {
+					return fmt.Errorf("key %q does not exist (use --add to insert)", key)
+				}
+				v.Set(part, value)
+				return nil
+			}
+			// Peek next part — if numeric, it's an array index
+			nextIdx, nextErr := strconv.Atoi(parts[i+1])
+			if nextErr == nil {
+				arr := v.Get(part)
+				arrTrees, ok := arr.([]*toml.Tree)
+				if !ok {
+					return fmt.Errorf("key %q is not an array of tables", strings.Join(parts[:i+1], "."))
+				}
+				if nextIdx < 0 || nextIdx >= len(arrTrees) {
+					return fmt.Errorf("index %d out of range for %q (length %d)", nextIdx, strings.Join(parts[:i+1], "."), len(arrTrees))
+				}
+				current = arrTrees[nextIdx]
+				i++ // skip the index part
+				continue
+			}
+			next := v.Get(part)
+			if next == nil {
+				if allowAdd {
+					newTree := toml.Tree{}
+					v.Set(part, &newTree)
+					current = &newTree
+				} else {
+					return fmt.Errorf("key %q does not exist (use --add to insert)", strings.Join(parts[:i+1], "."))
+				}
+			} else {
+				current = next
+			}
+		default:
+			return fmt.Errorf("key %q is not a table", strings.Join(parts[:i], "."))
+		}
 	}
 
 	return nil
