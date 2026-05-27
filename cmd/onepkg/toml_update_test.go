@@ -15,6 +15,7 @@ func TestParseValue(t *testing.T) {
 	}{
 		{"true", true},
 		{"false", false},
+		{"null", nil},
 		{"42", int64(42)},
 		{"0", int64(0)},
 		{"-1", int64(-1)},

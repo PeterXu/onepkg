@@ -11,8 +11,11 @@ import (
 )
 
 // ParseValue converts a string input to the appropriate Go type:
-// bool → float64 → int64 → string (fallback)
+// null → bool → float64 → int64 → string (fallback)
 func ParseValue(s string) interface{} {
+	if s == "null" {
+		return nil
+	}
 	if s == "true" {
 		return true
 	}
