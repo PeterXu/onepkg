@@ -166,8 +166,10 @@ apply_overlays() {
         if [ -e "$sys_path" ]; then
             echo "Overlay: using system $sys_path -> $item_path"
             if [ -d "$sys_path" ]; then
+                mkdir -p "$install_dir/$item_path"
                 cp -r "$sys_path/." "$install_dir/$item_path/"
             else
+                mkdir -p "$(dirname "$install_dir/$item_path")"
                 cp "$sys_path" "$install_dir/$item_path"
             fi
         fi
