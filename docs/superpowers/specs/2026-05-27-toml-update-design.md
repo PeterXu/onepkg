@@ -12,8 +12,9 @@ onepkg toml-update [--add] <key> <value> <file>
 
 - `--add` — upsert mode: update if key exists, add if it doesn't
 - Default (no flag) — update only: fail if key doesn't exist
+- `--add` must appear before `<key>`. Other positions are rejected.
 - `key` — Dotted TOML path (e.g. `version`, `services.command`, `dirs.0.path`)
-- `value` — New value as string. Auto-detected: `"true"`/`"false"` → bool, numeric → int64, otherwise string
+- `value` — New value as string. Auto-detected: `"true"`/`"false"` → bool, numeric (int or float) → number, otherwise string. Only scalar values supported (no arrays or inline tables).
 - `file` — Path to TOML file (modified in-place)
 
 ## Examples
@@ -36,8 +37,8 @@ onepkg toml-update dirs.0.path "/var/log/myapp" config.toml
 
 - New file `cmd/onepkg/toml_update.go` with `runTomlUpdate(args []string) error`
 - Uses `toml.LoadFile()` → `Tree`, `tree.Set(key, value)`, write back
-- Value auto-detection order: bool → int64 → string (fallback)
-- Array index via dotted path: `dirs.0.path` sets `[[dirs]].path` at index 0
+- Value auto-detection order: bool → float64 (if contains `.`) → int64 → string (fallback). Only scalar values.
+- Array index via dotted path: `dirs.0.path` → `tree.GetArray("dirs")`, get element at index 0 (must be `*toml.Tree`), then `.Set("path", value)`
 - CLI dispatch in `main.go`: detect `toml-update` as first positional arg
 
 ## Error Cases
@@ -56,5 +57,5 @@ onepkg toml-update dirs.0.path "/var/log/myapp" config.toml
 - Fail on missing key without `--add`
 - Fail on missing file
 - Fail on invalid path
-- Value auto-detection (bool, int, string)
+- Value auto-detection (bool, int, float, string)
 - Format preservation (comments and ordering unchanged)
