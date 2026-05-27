@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -530,5 +531,110 @@ func TestRunJsonUpdate_PreservesTabIndent(t *testing.T) {
 	s := string(data)
 	if !strings.Contains(s, "\t\"name\": \"new\"") {
 		t.Errorf("tab indent not preserved, got: %s", s)
+	}
+}
+
+func TestRunJsonUpdate_EmptyObject(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.json"
+	os.WriteFile(path, []byte(`{}`), 0644)
+
+	err := runJsonUpdateAdd([]string{"name", "alice", path})
+	if err != nil {
+		t.Fatalf("runJsonUpdateAdd on empty object: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	want := `"name": "alice"`
+	if !strings.Contains(string(data), want) {
+		t.Errorf("file content = %q, want to contain %q", string(data), want)
+	}
+}
+
+func TestRunJsonUpdate_DeepNesting(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.json"
+	os.WriteFile(path, []byte(`{"a": {"b": {"c": {"d": {"e": {"f": "deep"}}}}}}`), 0644)
+
+	err := runJsonUpdate([]string{"a.b.c.d.e.f", "updated", path})
+	if err != nil {
+		t.Fatalf("runJsonUpdate: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	want := `"f": "updated"`
+	if !strings.Contains(string(data), want) {
+		t.Errorf("file content = %q, want to contain %q", string(data), want)
+	}
+}
+
+func TestRunJsonUpdate_ValueWithQuotes(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.json"
+	os.WriteFile(path, []byte(`{"msg": "hello"}`), 0644)
+
+	err := runJsonUpdate([]string{"msg", `say "hi"`, path})
+	if err != nil {
+		t.Fatalf("runJsonUpdate: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	var result map[string]interface{}
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("result is not valid JSON: %v\ncontent: %s", err, string(data))
+	}
+	if result["msg"] != `say "hi"` {
+		t.Errorf("msg = %v, want %q", result["msg"], `say "hi"`)
+	}
+}
+
+func TestRunJsonUpdate_ValueWithBackslash(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.json"
+	os.WriteFile(path, []byte(`{"path": "/usr/bin"}`), 0644)
+
+	err := runJsonUpdate([]string{"path", `C:\Users\test`, path})
+	if err != nil {
+		t.Fatalf("runJsonUpdate: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	var result map[string]interface{}
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("result is not valid JSON: %v\ncontent: %s", err, string(data))
+	}
+	if result["path"] != `C:\Users\test` {
+		t.Errorf("path = %v, want %q", result["path"], `C:\Users\test`)
+	}
+}
+
+func TestRunJsonUpdate_ArrayPrimitive(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.json"
+	os.WriteFile(path, []byte(`{"tags": ["old", "stale"]}`), 0644)
+
+	err := runJsonUpdate([]string{"tags.0", "new", path})
+	if err != nil {
+		t.Fatalf("runJsonUpdate: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	want := `"new"`
+	if !strings.Contains(string(data), want) {
+		t.Errorf("file content = %q, want to contain %q", string(data), want)
+	}
+	if !strings.Contains(string(data), `"stale"`) {
+		t.Errorf("tags.1 should be preserved, got: %q", string(data))
+	}
+}
+
+func TestRunJsonUpdate_RootIsArray(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.json"
+	os.WriteFile(path, []byte(`["a", "b", "c"]`), 0644)
+
+	err := runJsonUpdate([]string{"0", "x", path})
+	if err == nil {
+		t.Error("expected error for non-object root")
 	}
 }
