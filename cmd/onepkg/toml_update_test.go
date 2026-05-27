@@ -467,6 +467,84 @@ func TestRunTomlUpdate_SameValue(t *testing.T) {
 	}
 }
 
+func TestRunTomlUpdate_Add_TopLevelBeforeSections(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.toml"
+	content := "name = \"old\"\n\n[services]\nname = \"svc\"\n"
+	os.WriteFile(path, []byte(content), 0644)
+
+	err := runTomlUpdateAdd([]string{"newkey", "newval", path})
+	if err != nil {
+		t.Fatalf("runTomlUpdateAdd: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	s := string(data)
+
+	// newkey must be a top-level key, not part of [services]
+	tree, err := toml.Load(s)
+	if err != nil {
+		t.Fatalf("result is not valid TOML: %v\ncontent: %s", err, s)
+	}
+	if tree.Get("newkey") != "newval" {
+		t.Errorf("newkey should be top-level, got services.newkey = %v", tree.Get("newkey"))
+	}
+}
+
+func TestRunTomlUpdate_Add_TopLevelBeforeSectionComment(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.toml"
+	content := "name = \"old\"\n\n# Services section\n[services]\nname = \"svc\"\n"
+	os.WriteFile(path, []byte(content), 0644)
+
+	err := runTomlUpdateAdd([]string{"newkey", "newval", path})
+	if err != nil {
+		t.Fatalf("runTomlUpdateAdd: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	s := string(data)
+
+	newkeyIdx := strings.Index(s, `newkey = "newval"`)
+	commentIdx := strings.Index(s, "# Services section")
+	if newkeyIdx == -1 {
+		t.Fatalf("newkey not found in: %s", s)
+	}
+	if commentIdx == -1 {
+		t.Fatalf("comment not found in: %s", s)
+	}
+	if newkeyIdx > commentIdx {
+		t.Errorf("newkey should be before section comment, got:\n%s", s)
+	}
+}
+
+func TestRunTomlUpdate_Add_SectionKeyBeforeNextSectionComment(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.toml"
+	content := "[services]\nname = \"svc\"\n\n# Logging\n[logging]\nlevel = \"info\"\n"
+	os.WriteFile(path, []byte(content), 0644)
+
+	err := runTomlUpdateAdd([]string{"services.port", "8080", path})
+	if err != nil {
+		t.Fatalf("runTomlUpdateAdd: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	s := string(data)
+
+	portIdx := strings.Index(s, "port = 8080")
+	commentIdx := strings.Index(s, "# Logging")
+	if portIdx == -1 {
+		t.Fatalf("port not found in: %s", s)
+	}
+	if commentIdx == -1 {
+		t.Fatalf("# Logging not found in: %s", s)
+	}
+	if portIdx > commentIdx {
+		t.Errorf("new key should be before # Logging comment, got:\n%s", s)
+	}
+}
+
 func mustRead(path string) string {
 	data, _ := os.ReadFile(path)
 	return string(data)

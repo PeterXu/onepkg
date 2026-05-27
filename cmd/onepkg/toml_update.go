@@ -182,34 +182,81 @@ func replaceValueInContent(content string, key string, oldStr string, newStr str
 
 // appendKeyToContent appends a new key=value line at the correct position
 // in the file, without re-serializing the entire TOML tree.
+// It preserves comments and blank lines that precede section headers.
 func appendKeyToContent(content string, key string, value string) (string, error) {
 	parts := strings.Split(key, ".")
 	leafKey := parts[len(parts)-1]
 	newLine := leafKey + " = " + value
 
-	// Top-level key: append to end of file
+	// Top-level key: insert before first section header
 	if len(parts) == 1 {
-		if !strings.HasSuffix(content, "\n") {
-			content += "\n"
+		insertPos := findTopLevelInsertPoint(content)
+		before := content[:insertPos]
+		after := content[insertPos:]
+		if !strings.HasSuffix(before, "\n") {
+			before += "\n"
 		}
-		return content + newLine + "\n", nil
+		return before + newLine + "\n" + after, nil
 	}
 
-	// Navigate to the parent section
-	parentParts := parts[:len(parts)-1]
-	scopeStart, scopeEnd := findSectionRange(content, parentParts)
+	// Navigate to the parent section.
+	// Replace leaf key with empty string so parseSectionTargets processes
+	// all section parts (otherwise it skips the last, assuming it's a leaf key).
+	navParts := make([]string, len(parts))
+	copy(navParts, parts)
+	navParts[len(parts)-1] = ""
+	scopeStart, scopeEnd := findSectionRange(content, navParts)
 	if scopeStart == -1 {
 		return "", fmt.Errorf("parent section for key %q not found", key)
 	}
 
-	before := content[:scopeEnd]
-	after := content[scopeEnd:]
-
+	insertPos := findInsertionPointBeforeSection(content, scopeEnd)
+	before := content[:insertPos]
+	after := content[insertPos:]
 	if !strings.HasSuffix(before, "\n") {
 		before += "\n"
 	}
 
 	return before + newLine + "\n" + after, nil
+}
+
+// findTopLevelInsertPoint finds where to insert a top-level key:
+// before any comments/blank lines that precede the first section header.
+func findTopLevelInsertPoint(content string) int {
+	re := regexp.MustCompile(`(?m)^\[`)
+	match := re.FindStringIndex(content)
+	if match == nil {
+		return len(content)
+	}
+	return findInsertionPointBeforeSection(content, match[0])
+}
+
+// findInsertionPointBeforeSection scans backwards from a section header
+// position, skipping trailing blank lines and comments to find the
+// end of actual key=value content in the preceding section.
+func findInsertionPointBeforeSection(content string, sectionPos int) int {
+	before := content[:sectionPos]
+	lines := strings.Split(before, "\n")
+
+	i := len(lines) - 1
+	for i >= 0 {
+		trimmed := strings.TrimSpace(lines[i])
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			i--
+		} else {
+			break
+		}
+	}
+
+	if i < 0 {
+		return 0
+	}
+
+	prefix := strings.Join(lines[:i+1], "\n")
+	if !strings.HasSuffix(prefix, "\n") {
+		prefix += "\n"
+	}
+	return len(prefix)
 }
 
 // replaceLine replaces a single key=value line in content.
