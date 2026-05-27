@@ -421,3 +421,114 @@ func TestRunJsonUpdate_InvalidJSON(t *testing.T) {
 		t.Error("expected error for invalid JSON")
 	}
 }
+
+func TestRunJsonUpdateAdd_NewKey(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.json"
+	os.WriteFile(path, []byte(`{"name": "old"}`), 0644)
+
+	err := runJsonUpdateAdd([]string{"newkey", "newval", path})
+	if err != nil {
+		t.Fatalf("runJsonUpdateAdd: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	s := string(data)
+	if !strings.Contains(s, `"newkey": "newval"`) {
+		t.Errorf("new key not added, got: %s", s)
+	}
+	if !strings.Contains(s, `"name": "old"`) {
+		t.Errorf("original key should be preserved, got: %s", s)
+	}
+}
+
+func TestRunJsonUpdateAdd_ExistingKey(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.json"
+	os.WriteFile(path, []byte(`{"name": "old"}`), 0644)
+
+	err := runJsonUpdateAdd([]string{"name", "updated", path})
+	if err != nil {
+		t.Fatalf("runJsonUpdateAdd: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	want := `"name": "updated"`
+	if !strings.Contains(string(data), want) {
+		t.Errorf("file content = %q, want to contain %q", string(data), want)
+	}
+}
+
+func TestRunJsonUpdateAdd_NestedNewKey(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.json"
+	os.WriteFile(path, []byte(`{"services": {"web": {"port": 80}}}`), 0644)
+
+	err := runJsonUpdateAdd([]string{"services.web.host", "localhost", path})
+	if err != nil {
+		t.Fatalf("runJsonUpdateAdd: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	s := string(data)
+	if !strings.Contains(s, `"host": "localhost"`) {
+		t.Errorf("new nested key not added, got: %s", s)
+	}
+	if !strings.Contains(s, `"port": 80`) {
+		t.Errorf("existing key should be preserved, got: %s", s)
+	}
+}
+
+func TestRunJsonUpdate_PreservesTwoSpaceIndent(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.json"
+	input := "{\n  \"name\": \"old\",\n  \"version\": \"v1\"\n}\n"
+	os.WriteFile(path, []byte(input), 0644)
+
+	err := runJsonUpdate([]string{"name", "new", path})
+	if err != nil {
+		t.Fatalf("runJsonUpdate: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	s := string(data)
+	if !strings.Contains(s, "  \"name\": \"new\"") {
+		t.Errorf("2-space indent not preserved, got: %s", s)
+	}
+}
+
+func TestRunJsonUpdate_PreservesFourSpaceIndent(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.json"
+	input := "{\n    \"name\": \"old\"\n}\n"
+	os.WriteFile(path, []byte(input), 0644)
+
+	err := runJsonUpdate([]string{"name", "new", path})
+	if err != nil {
+		t.Fatalf("runJsonUpdate: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	s := string(data)
+	if !strings.Contains(s, "    \"name\": \"new\"") {
+		t.Errorf("4-space indent not preserved, got: %s", s)
+	}
+}
+
+func TestRunJsonUpdate_PreservesTabIndent(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.json"
+	input := "{\n\t\"name\": \"old\"\n}\n"
+	os.WriteFile(path, []byte(input), 0644)
+
+	err := runJsonUpdate([]string{"name", "new", path})
+	if err != nil {
+		t.Fatalf("runJsonUpdate: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	s := string(data)
+	if !strings.Contains(s, "\t\"name\": \"new\"") {
+		t.Errorf("tab indent not preserved, got: %s", s)
+	}
+}
