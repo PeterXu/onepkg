@@ -1158,3 +1158,70 @@ func TestApplyDefaultsDirs(t *testing.T) {
 		})
 	}
 }
+
+func TestParseConfigWithSystemOverlay(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+
+	content := `
+name = "myapp"
+version = "v1.0.0"
+
+items = ["bin/myapp", "data/test1.txt", "data/certs/"]
+
+[[system_overlay]]
+system = "/etc/agent/test1.txt"
+item = "data/test1.txt"
+
+[[system_overlay]]
+system = "/etc/certs"
+item = "data/certs"
+`
+	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := ParseConfig(configPath)
+	if err != nil {
+		t.Fatalf("ParseConfig returned error: %v", err)
+	}
+
+	if len(cfg.SystemOverlay) != 2 {
+		t.Fatalf("len(SystemOverlay) = %d, want 2", len(cfg.SystemOverlay))
+	}
+	if cfg.SystemOverlay[0].System != "/etc/agent/test1.txt" {
+		t.Errorf("SystemOverlay[0].System = %q, want %q", cfg.SystemOverlay[0].System, "/etc/agent/test1.txt")
+	}
+	if cfg.SystemOverlay[0].Item != "data/test1.txt" {
+		t.Errorf("SystemOverlay[0].Item = %q, want %q", cfg.SystemOverlay[0].Item, "data/test1.txt")
+	}
+	if cfg.SystemOverlay[1].System != "/etc/certs" {
+		t.Errorf("SystemOverlay[1].System = %q, want %q", cfg.SystemOverlay[1].System, "/etc/certs")
+	}
+	if cfg.SystemOverlay[1].Item != "data/certs" {
+		t.Errorf("SystemOverlay[1].Item = %q, want %q", cfg.SystemOverlay[1].Item, "data/certs")
+	}
+}
+
+func TestParseConfigSystemOverlayEmpty(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+
+	content := `
+name = "myapp"
+version = "v1.0.0"
+items = ["bin/myapp"]
+`
+	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := ParseConfig(configPath)
+	if err != nil {
+		t.Fatalf("ParseConfig returned error: %v", err)
+	}
+
+	if len(cfg.SystemOverlay) != 0 {
+		t.Errorf("len(SystemOverlay) = %d, want 0 (no overlay defined)", len(cfg.SystemOverlay))
+	}
+}

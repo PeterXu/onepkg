@@ -18,6 +18,7 @@ type Config struct {
 	Exclude            []string        `toml:"exclude"`              // patterns to exclude from package
 	Items              []string        `toml:"items"`
 	Dirs               []DirConfig     `toml:"dirs"`
+	SystemOverlay      []OverlayConfig `toml:"system_overlay"`
 	Services           []ServiceConfig `toml:"services"`
 }
 
@@ -53,6 +54,11 @@ type DirConfig struct {
 	Owner string `toml:"owner"` // Optional, default: service user or root
 	Group string `toml:"group"` // Optional, default: same as owner
 	Mode  string `toml:"mode"`  // Optional, default: "0755"
+}
+
+type OverlayConfig struct {
+	System string `toml:"system"`
+	Item   string `toml:"item"`
 }
 
 func ParseConfig(path string) (*Config, error) {
