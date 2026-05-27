@@ -113,3 +113,41 @@ func setKeyValue(tree map[string]interface{}, keyParts []string, value interface
 
 	setKeyValue(nested, keyParts[1:], value)
 }
+
+func runTomlUpdateAdd(args []string) error {
+	if len(args) < 3 {
+		return fmt.Errorf("usage: onepkg toml-update --add <key> <value> <file>")
+	}
+
+	key := args[0]
+	value := ParseValue(args[1])
+	filePath := args[2]
+
+	// Read and decode the TOML file
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", filePath, err)
+	}
+
+	var tree map[string]interface{}
+	_, err = toml.Decode(string(data), &tree)
+	if err != nil {
+		return fmt.Errorf("decode %s: %w", filePath, err)
+	}
+
+	// Set the value (create key if it doesn't exist)
+	keyParts := strings.Split(key, ".")
+	setKeyValue(tree, keyParts, value)
+
+	// Encode back to TOML
+	encoded, err := toml.Marshal(tree)
+	if err != nil {
+		return fmt.Errorf("encode: %w", err)
+	}
+
+	if err := os.WriteFile(filePath, encoded, 0644); err != nil {
+		return fmt.Errorf("write %s: %w", filePath, err)
+	}
+
+	return nil
+}

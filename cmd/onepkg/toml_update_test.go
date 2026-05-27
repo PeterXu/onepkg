@@ -133,3 +133,40 @@ func TestRunTomlUpdate_TooFewArgs(t *testing.T) {
 		t.Error("expected error for too few args")
 	}
 }
+
+func TestRunTomlUpdate_Add_NewKey(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.toml"
+	os.WriteFile(path, []byte("name = \"old\"\n"), 0644)
+
+	err := runTomlUpdateAdd([]string{"newkey", "newval", path})
+	if err != nil {
+		t.Fatalf("runTomlUpdateAdd: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	want := `newkey = "newval"`
+	if !strings.Contains(string(data), want) {
+		t.Errorf("file content = %q, want to contain %q", string(data), want)
+	}
+	if !strings.Contains(string(data), `name = "old"`) {
+		t.Errorf("original key should be preserved, got: %q", string(data))
+	}
+}
+
+func TestRunTomlUpdate_Add_ExistingKey(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.toml"
+	os.WriteFile(path, []byte("name = \"old\"\n"), 0644)
+
+	err := runTomlUpdateAdd([]string{"name", "updated", path})
+	if err != nil {
+		t.Fatalf("runTomlUpdateAdd: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	want := `name = "updated"`
+	if !strings.Contains(string(data), want) {
+		t.Errorf("file content = %q, want to contain %q", string(data), want)
+	}
+}
