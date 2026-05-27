@@ -17,6 +17,27 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Subcommand dispatch
+	if os.Args[1] == "toml-update" {
+		var addMode bool
+		rest := os.Args[2:]
+		if len(rest) > 0 && rest[0] == "--add" {
+			addMode = true
+			rest = rest[1:]
+		}
+		var err error
+		if addMode {
+			err = runTomlUpdateAdd(rest)
+		} else {
+			err = runTomlUpdate(rest)
+		}
+		if err != nil {
+			fmt.Printf("Error: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	var configPath string
 	var platformInput string
 	var outputOverride string
@@ -253,6 +274,11 @@ func printHelp() {
 
 Usage:
   onepkg -c config.toml --platform <platforms> [options]
+  onepkg toml-update [--add] <key> <value> <file>
+
+Subcommands:
+  toml-update           Update a key/value in a TOML file
+    --add               Upsert: add if key doesn't exist, update if it does
 
 Options:
   -c, --config <path>      Path to config.toml (required)
@@ -275,5 +301,7 @@ Item syntax:
 Examples:
   onepkg -c config.toml --platform linux-arm64
   onepkg -c config.toml --platform linux-arm64,linux-amd64
-  onepkg -c config.toml --platform darwin-arm64 --output ./dist`)
+  onepkg -c config.toml --platform darwin-arm64 --output ./dist
+  onepkg toml-update version "1.0.1" config.toml
+  onepkg toml-update --add newkey "value" config.toml`)
 }
