@@ -227,3 +227,110 @@ item = "data/config.txt"
 		t.Error("installer should have apply_overlays function")
 	}
 }
+
+func TestOverlayEndToEnd(t *testing.T) {
+	projectDir := t.TempDir()
+
+	// Create project files
+	binDir := filepath.Join(projectDir, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(binDir, "myapp"), []byte("#!/bin/sh\necho hello"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	configContent := `
+name = "e2etest"
+version = "v1.0.0"
+output_dir = "packages"
+
+items = ["bin/myapp"]
+
+[[system_overlay]]
+system = "/etc/e2etest/config.txt"
+item = "bin/myapp"
+`
+	configPath := filepath.Join(projectDir, "config.toml")
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := ParseConfig(configPath)
+	if err != nil {
+		t.Fatalf("ParseConfig: %v", err)
+	}
+	cfg.ApplyDefaults()
+	if err := cfg.Validate(projectDir); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+
+	resolved, err := ResolveItems(projectDir, cfg.Items, "linux-amd64")
+	if err != nil {
+		t.Fatalf("ResolveItems: %v", err)
+	}
+	entries, err := CollectFilesResolved(projectDir, resolved, cfg.Exclude)
+	if err != nil {
+		t.Fatalf("CollectFilesResolved: %v", err)
+	}
+	tarData, err := BuildTarGZ(entries, true)
+	if err != nil {
+		t.Fatalf("BuildTarGZ: %v", err)
+	}
+
+	shaMap := make(map[string]string)
+	for _, e := range entries {
+		shaMap[e.RelPath] = e.SHA1
+	}
+
+	outputDir := filepath.Join(projectDir, cfg.OutputDir)
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := BuildForPlatform(cfg, "linux-amd64", entries, tarData, shaMap, outputDir); err != nil {
+		t.Fatalf("BuildForPlatform: %v", err)
+	}
+
+	scriptBytes, err := os.ReadFile(filepath.Join(outputDir, "e2etest_v1.0.0_linux_amd64.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(scriptBytes)
+
+	// Verify the apply_overlays function exists
+	if !strings.Contains(script, "apply_overlays()") {
+		t.Fatal("installer missing apply_overlays function")
+	}
+
+	// Verify the overlay function checks for existence before copying
+	if !strings.Contains(script, `[ -e "$sys_path" ]`) {
+		t.Error("apply_overlays should check if system path exists before copying")
+	}
+
+	// Verify directory copy uses recursive flag
+	if !strings.Contains(script, `cp -r "$sys_path/."`) {
+		t.Error("apply_overlays should use cp -r for directories")
+	}
+
+	// Verify file copy (non-directory)
+	if !strings.Contains(script, `cp "$sys_path" "$install_dir/$item_path"`) {
+		t.Error("apply_overlays should use cp for files")
+	}
+
+	// Verify the function is called during install
+	if !strings.Contains(script, `apply_overlays "$install_dir"`) {
+		t.Error("cmd_install should call apply_overlays")
+	}
+
+	// Verify overlay variables
+	if !strings.Contains(script, "OVERLAY_COUNT=1") {
+		t.Error("installer should have OVERLAY_COUNT=1")
+	}
+	if !strings.Contains(script, `OVERLAY_0_SYSTEM="/etc/e2etest/config.txt"`) {
+		t.Error("installer should have correct OVERLAY_0_SYSTEM")
+	}
+	if !strings.Contains(script, `OVERLAY_0_ITEM="bin/myapp"`) {
+		t.Error("installer should have correct OVERLAY_0_ITEM")
+	}
+}
