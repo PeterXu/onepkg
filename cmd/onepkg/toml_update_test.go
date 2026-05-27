@@ -396,6 +396,76 @@ log.level = "info"
 	}
 }
 
+func TestRunTomlUpdate_StringValuePreserved(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.toml"
+	content := `name = "true"
+mode = "0750"
+ver = "1.0"
+`
+	os.WriteFile(path, []byte(content), 0644)
+
+	tests := []struct {
+		key      string
+		value    string
+		expected string
+	}{
+		{"name", "false", `name = "false"`},
+		{"mode", "0644", `mode = "0644"`},
+		{"ver", "2.0", `ver = "2.0"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.key, func(t *testing.T) {
+			err := runTomlUpdate([]string{tt.key, tt.value, path})
+			if err != nil {
+				t.Fatalf("runTomlUpdate(%q, %q): %v", tt.key, tt.value, err)
+			}
+			data, _ := os.ReadFile(path)
+			s := string(data)
+			if !strings.Contains(s, tt.expected) {
+				t.Errorf("got %q, want to contain %q", s, tt.expected)
+			}
+			// Verify the result is valid TOML
+			tree, err := toml.Load(s)
+			if err != nil {
+				t.Fatalf("result is not valid TOML: %v\ncontent: %s", err, s)
+			}
+			got := tree.Get(tt.key)
+			if got != tt.value {
+				t.Errorf("%s = %v (%T), want %q (string)", tt.key, got, got, tt.value)
+			}
+		})
+	}
+}
+
+func TestRunTomlUpdate_SameValue(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.toml"
+	os.WriteFile(path, []byte("name = \"old\"\ncount = 5\nenabled = true\n"), 0644)
+
+	tests := []struct {
+		key   string
+		value string
+	}{
+		{"name", "old"},
+		{"count", "5"},
+		{"enabled", "true"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.key, func(t *testing.T) {
+			original, _ := os.ReadFile(path)
+			err := runTomlUpdate([]string{tt.key, tt.value, path})
+			if err != nil {
+				t.Errorf("runTomlUpdate(%q, %q): unexpected error: %v", tt.key, tt.value, err)
+			}
+			after, _ := os.ReadFile(path)
+			if string(original) != string(after) {
+				t.Errorf("file should not change when value is the same\nbefore: %q\nafter: %q", string(original), string(after))
+			}
+		})
+	}
+}
+
 func mustRead(path string) string {
 	data, _ := os.ReadFile(path)
 	return string(data)

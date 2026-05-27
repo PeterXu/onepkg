@@ -65,14 +65,21 @@ func tomlUpdateCore(args []string, allowAdd bool) error {
 		return fmt.Errorf("key %q does not exist (use --add to insert)", key)
 	}
 
-	newStr := formatTOMLValue(newVal)
-
 	if existed {
 		oldVal := getValueFromTree(tree, key)
 		if oldVal == nil {
 			return fmt.Errorf("key %q exists but value cannot be retrieved", key)
 		}
+		// If the existing value is a string, treat the new value as a string too
+		// to avoid type mismatch (e.g., "true" → bool, "1.0" → float)
+		if _, isStr := oldVal.(string); isStr {
+			newVal = args[1]
+		}
+		newStr := formatTOMLValue(newVal)
 		oldStr := formatTOMLValue(oldVal)
+		if oldStr == newStr {
+			return nil // already set
+		}
 		result := replaceValueInContent(string(raw), key, oldStr, newStr)
 		if result == string(raw) {
 			return fmt.Errorf("could not update key %q in-place", key)
@@ -81,6 +88,7 @@ func tomlUpdateCore(args []string, allowAdd bool) error {
 	}
 
 	// --add new key: text-based append (no re-serialization)
+	newStr := formatTOMLValue(newVal)
 	result, err := appendKeyToContent(string(raw), key, newStr)
 	if err != nil {
 		return err
