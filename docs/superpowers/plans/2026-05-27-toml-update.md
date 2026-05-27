@@ -131,7 +131,6 @@ func TestRunTomlUpdate_TopLevelString(t *testing.T) {
 	if !strings.Contains(string(data), want) {
 		t.Errorf("file content = %q, want to contain %q", string(data), want)
 	}
-	// version should be preserved
 	if !strings.Contains(string(data), "version = \"v1.0.0\"") {
 		t.Errorf("version should be preserved, got: %q", string(data))
 	}
@@ -313,7 +312,6 @@ func TestRunTomlUpdate_Add_NewKey(t *testing.T) {
 	if !strings.Contains(string(data), want) {
 		t.Errorf("file content = %q, want to contain %q", string(data), want)
 	}
-	// original key preserved
 	if !strings.Contains(string(data), `name = "old"`) {
 		t.Errorf("original key should be preserved, got: %q", string(data))
 	}
@@ -427,7 +425,6 @@ owner = "app"
 	if arr[0].Get("owner") != "nobody" {
 		t.Errorf("dirs.0.owner = %v, want nobody", arr[0].Get("owner"))
 	}
-	// second element unchanged
 	if arr[1].Get("owner") != "app" {
 		t.Errorf("dirs.1.owner should be unchanged, got %v", arr[1].Get("owner"))
 	}
@@ -455,9 +452,40 @@ Expected: FAIL — `tree.Set("dirs.0.owner", ...)` doesn't work with arrays nati
 
 - [ ] **Step 3: Refactor implementation to handle array indices**
 
-Replace `runTomlUpdate` and `runTomlUpdateAdd` in `cmd/onepkg/toml_update.go` with a shared core that handles array indices:
+Replace `runTomlUpdate` and `runTomlUpdateAdd` in `cmd/onepkg/toml_update.go` with a shared core that handles array indices. The full file should contain:
 
 ```go
+package main
+
+import (
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
+
+	"github.com/BurntSushi/toml"
+)
+
+// ParseValue converts a string input to the appropriate Go type:
+// bool → float64 → int64 → string (fallback)
+func ParseValue(s string) interface{} {
+	if s == "true" {
+		return true
+	}
+	if s == "false" {
+		return false
+	}
+	if strings.Contains(s, ".") {
+		if f, err := strconv.ParseFloat(s, 64); err == nil {
+			return f
+		}
+	}
+	if i, err := strconv.ParseInt(s, 10, 64); err == nil {
+		return i
+	}
+	return s
+}
+
 // runTomlUpdate executes the toml-update subcommand (update-only).
 func runTomlUpdate(args []string) error {
 	return tomlUpdateCore(args, false)
@@ -499,64 +527,7 @@ func tomlUpdateCore(args []string, allowAdd bool) error {
 }
 
 // setKey sets a value at the given dotted key path, handling array indices.
-func setKey(tree *toml.Tree, key string, value interface{}, allowAdd bool) error {
-	parts := strings.Split(key, ".")
-
-	// Walk to the parent, handling array indices
-	current := interface{}(tree)
-	for i, part := range parts {
-		isLast := i == len(parts)-1
-
-		switch v := current.(type) {
-		case *toml.Tree:
-			if isLast {
-				if !v.Has(part) && !allowAdd {
-					return fmt.Errorf("key %q does not exist (use --add to insert)", key)
-				}
-				v.Set(part, value)
-				return nil
-			}
-			// Check if next part is a numeric index
-			nextIdx, nextErr := strconv.Atoi(parts[i+1])
-			if nextErr == nil {
-				arr := v.Get(part)
-				arrTrees, ok := arr.([]*toml.Tree)
-				if !ok {
-					return fmt.Errorf("key %q is not an array of tables", strings.Join(parts[:i+1], "."))
-				}
-				if nextIdx < 0 || nextIdx >= len(arrTrees) {
-					return fmt.Errorf("index %d out of range for %q (length %d)", nextIdx, strings.Join(parts[:i+1], "."), len(arrTrees))
-				}
-				current = arrTrees[nextIdx]
-				i++ // skip the index part — consumed in this iteration's logic
-				// But we can't skip in a for-range; use a different approach
-				continue
-			}
-			next := v.Get(part)
-			if next == nil {
-				if allowAdd {
-					newTree := toml.Tree{}
-					v.Set(part, &newTree)
-					current = &newTree
-				} else {
-					return fmt.Errorf("key %q does not exist (use --add to insert)", strings.Join(parts[:i+1], "."))
-				}
-			} else {
-				current = next
-			}
-		case []*toml.Tree:
-			return fmt.Errorf("unexpected array at %q", strings.Join(parts[:i], "."))
-		default:
-			return fmt.Errorf("key %q is not a table", strings.Join(parts[:i], "."))
-		}
-	}
-
-	return nil
-}
-```
-
-```go
-// setKey sets a value at the given dotted key path, handling array indices.
+// Uses an explicit index loop (not for-range) so it can skip array index parts via i++.
 func setKey(tree *toml.Tree, key string, value interface{}, allowAdd bool) error {
 	parts := strings.Split(key, ".")
 	current := interface{}(tree)
