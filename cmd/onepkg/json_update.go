@@ -105,12 +105,8 @@ func formatJSONValue(v interface{}) string {
 	case float64:
 		return strconv.FormatFloat(val, 'f', -1, 64)
 	case string:
-		escaped := strings.ReplaceAll(val, `\`, `\\`)
-		escaped = strings.ReplaceAll(escaped, `"`, `\"`)
-		escaped = strings.ReplaceAll(escaped, "\n", `\n`)
-		escaped = strings.ReplaceAll(escaped, "\t", `\t`)
-		escaped = strings.ReplaceAll(escaped, "\r", `\r`)
-		return `"` + escaped + `"`
+		b, _ := json.Marshal(val)
+		return string(b)
 	default:
 		return fmt.Sprintf("%v", val)
 	}
