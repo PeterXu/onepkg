@@ -38,6 +38,26 @@ func main() {
 		return
 	}
 
+	if os.Args[1] == "json-update" {
+		var addMode bool
+		rest := os.Args[2:]
+		if len(rest) > 0 && rest[0] == "--add" {
+			addMode = true
+			rest = rest[1:]
+		}
+		var err error
+		if addMode {
+			err = runJsonUpdateAdd(rest)
+		} else {
+			err = runJsonUpdate(rest)
+		}
+		if err != nil {
+			fmt.Printf("Error: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	var configPath string
 	var platformInput string
 	var outputOverride string
@@ -285,9 +305,12 @@ func printHelp() {
 Usage:
   onepkg -c config.toml --platform <platforms> [options]
   onepkg toml-update [--add] <key> <value> <file>
+  onepkg json-update [--add] <key> <value> <file>
 
 Subcommands:
   toml-update           Update a key/value in a TOML file
+    --add               Upsert: add if key doesn't exist, update if it does
+  json-update           Update a key/value in a JSON file
     --add               Upsert: add if key doesn't exist, update if it does
 
 Options:
@@ -313,5 +336,7 @@ Examples:
   onepkg -c config.toml --platform linux-arm64,linux-amd64
   onepkg -c config.toml --platform darwin-arm64 --output ./dist
   onepkg toml-update version "1.0.1" config.toml
-  onepkg toml-update --add newkey "value" config.toml`)
+  onepkg toml-update --add newkey "value" config.toml
+  onepkg json-update version "1.0.1" package.json
+  onepkg json-update --add newField "value" package.json`)
 }
