@@ -3,10 +3,11 @@ package main
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 
-	"github.com/pelletier/go-toml"
+	toml "github.com/pelletier/go-toml"
 )
 
 // ParseValue converts a string input to the appropriate Go type:
@@ -45,15 +46,38 @@ func tomlUpdateCore(args []string, allowAdd bool) error {
 	}
 
 	key := args[0]
-	value := ParseValue(args[1])
+	newVal := ParseValue(args[1])
 	filePath := args[2]
 
-	tree, err := toml.LoadFile(filePath)
+	raw, err := os.ReadFile(filePath)
 	if err != nil {
-		return fmt.Errorf("load %s: %w", filePath, err)
+		return fmt.Errorf("read %s: %w", filePath, err)
 	}
 
-	if err := setKey(tree, key, value, allowAdd); err != nil {
+	tree, err := toml.Load(string(raw))
+	if err != nil {
+		return fmt.Errorf("parse %s: %w", filePath, err)
+	}
+
+	existed := keyExistsInTree(tree, key)
+
+	if !existed && !allowAdd {
+		return fmt.Errorf("key %q does not exist (use --add to insert)", key)
+	}
+
+	// For existing keys: do targeted text replacement to preserve formatting
+	if existed {
+		oldVal := getValueFromTree(tree, key)
+		if oldVal != nil {
+			result := replaceValueInContent(string(raw), key, formatTOMLValue(oldVal), formatTOMLValue(newVal))
+			if result != string(raw) {
+				return os.WriteFile(filePath, []byte(result), 0644)
+			}
+		}
+	}
+
+	// For new keys or fallback: modify tree and re-serialize
+	if err := setKey(tree, key, newVal, allowAdd); err != nil {
 		return err
 	}
 
@@ -61,16 +85,10 @@ func tomlUpdateCore(args []string, allowAdd bool) error {
 	if _, err := tree.WriteTo(&buf); err != nil {
 		return fmt.Errorf("encode: %w", err)
 	}
-
-	if err := os.WriteFile(filePath, []byte(buf.String()), 0644); err != nil {
-		return fmt.Errorf("write %s: %w", filePath, err)
-	}
-
-	return nil
+	return os.WriteFile(filePath, []byte(buf.String()), 0644)
 }
 
 // setKey sets a value at the given dotted key path, handling array indices.
-// Uses an explicit index loop (not for-range) so it can skip array index parts via i++.
 func setKey(tree *toml.Tree, key string, value interface{}, allowAdd bool) error {
 	parts := strings.Split(key, ".")
 	current := interface{}(tree)
@@ -88,7 +106,6 @@ func setKey(tree *toml.Tree, key string, value interface{}, allowAdd bool) error
 				v.Set(part, value)
 				return nil
 			}
-			// Peek next part — if numeric, it's an array index
 			nextIdx, nextErr := strconv.Atoi(parts[i+1])
 			if nextErr == nil {
 				arr := v.Get(part)
@@ -100,7 +117,7 @@ func setKey(tree *toml.Tree, key string, value interface{}, allowAdd bool) error
 					return fmt.Errorf("index %d out of range for %q (length %d)", nextIdx, strings.Join(parts[:i+1], "."), len(arrTrees))
 				}
 				current = arrTrees[nextIdx]
-				i++ // skip the index part
+				i++
 				continue
 			}
 			next := v.Get(part)
@@ -121,4 +138,119 @@ func setKey(tree *toml.Tree, key string, value interface{}, allowAdd bool) error
 	}
 
 	return nil
+}
+
+// keyExistsInTree checks if a dotted key path exists in the tree.
+func keyExistsInTree(tree *toml.Tree, key string) bool {
+	parts := strings.Split(key, ".")
+	current := interface{}(tree)
+	for i := 0; i < len(parts); i++ {
+		part := parts[i]
+		switch v := current.(type) {
+		case *toml.Tree:
+			if i == len(parts)-1 {
+				return v.Has(part)
+			}
+			nextIdx, nextErr := strconv.Atoi(parts[i+1])
+			if nextErr == nil {
+				arr := v.Get(part)
+				arrTrees, ok := arr.([]*toml.Tree)
+				if !ok || nextIdx < 0 || nextIdx >= len(arrTrees) {
+					return false
+				}
+				current = arrTrees[nextIdx]
+				i++
+				continue
+			}
+			next := v.Get(part)
+			if next == nil {
+				return false
+			}
+			current = next
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// getValueFromTree retrieves the value at a dotted key path from the tree.
+func getValueFromTree(tree *toml.Tree, key string) interface{} {
+	parts := strings.Split(key, ".")
+	current := interface{}(tree)
+	for i := 0; i < len(parts); i++ {
+		part := parts[i]
+		switch v := current.(type) {
+		case *toml.Tree:
+			if i == len(parts)-1 {
+				return v.Get(part)
+			}
+			nextIdx, nextErr := strconv.Atoi(parts[i+1])
+			if nextErr == nil {
+				arr := v.Get(part)
+				arrTrees, ok := arr.([]*toml.Tree)
+				if !ok || nextIdx < 0 || nextIdx >= len(arrTrees) {
+					return nil
+				}
+				current = arrTrees[nextIdx]
+				i++
+				continue
+			}
+			next := v.Get(part)
+			if next == nil {
+				return nil
+			}
+			current = next
+		default:
+			return nil
+		}
+	}
+	return nil
+}
+
+// replaceValueInContent replaces the old value with the new value in raw TOML content.
+// It finds the line containing oldStr as the value and replaces it with newStr,
+// preserving comments, whitespace, and all other content.
+func replaceValueInContent(content string, key string, oldStr string, newStr string) string {
+	// Find the key's leaf name (last non-numeric part)
+	parts := strings.Split(key, ".")
+	leafKey := parts[len(parts)-1]
+	for _, p := range parts {
+		if _, err := strconv.Atoi(p); err != nil {
+			leafKey = p
+		}
+	}
+
+	// For top-level keys or when there's only one occurrence, do a simple line match
+	// Match: <whitespace><key><whitespace>=<whitespace><value><rest of line>
+	pattern := `(?m)^(\s*` + regexp.QuoteMeta(leafKey) + `\s*=\s*)` +
+		regexp.QuoteMeta(oldStr) + `(.*)$`
+
+	re := regexp.MustCompile(pattern)
+	return re.ReplaceAllStringFunc(content, func(match string) string {
+		subs := re.FindStringSubmatch(match)
+		if subs == nil {
+			return match
+		}
+		return subs[1] + newStr + subs[2]
+	})
+}
+
+// formatTOMLValue formats a Go value as a TOML value string.
+func formatTOMLValue(v interface{}) string {
+	switch val := v.(type) {
+	case bool:
+		if val {
+			return "true"
+		}
+		return "false"
+	case int64:
+		return strconv.FormatInt(val, 10)
+	case float64:
+		return strconv.FormatFloat(val, 'f', -1, 64)
+	case string:
+		return `"` + val + `"`
+	default:
+		return fmt.Sprintf("%v", val)
+	}
 }
