@@ -141,3 +141,43 @@ func TestNavigateJSON_ArraySecondElement(t *testing.T) {
 		t.Errorf("value = %v, want second", m[leaf])
 	}
 }
+
+func TestDetectIndentation_TwoSpaces(t *testing.T) {
+	raw := []byte("{\n  \"name\": \"alice\"\n}")
+	indent := detectIndentation(raw)
+	if indent != "  " {
+		t.Errorf("got %q, want %q", indent, "  ")
+	}
+}
+
+func TestDetectIndentation_FourSpaces(t *testing.T) {
+	raw := []byte("{\n    \"name\": \"alice\"\n}")
+	indent := detectIndentation(raw)
+	if indent != "    " {
+		t.Errorf("got %q, want %q", indent, "    ")
+	}
+}
+
+func TestDetectIndentation_Tab(t *testing.T) {
+	raw := []byte("{\n\t\"name\": \"alice\"\n}")
+	indent := detectIndentation(raw)
+	if indent != "\t" {
+		t.Errorf("got %q, want tab", indent)
+	}
+}
+
+func TestDetectIndentation_Default(t *testing.T) {
+	raw := []byte("{\"name\": \"alice\"}")
+	indent := detectIndentation(raw)
+	if indent != "  " {
+		t.Errorf("got %q, want default %q", indent, "  ")
+	}
+}
+
+func TestDetectIndentation_Array(t *testing.T) {
+	raw := []byte("[\n  \"a\",\n  \"b\"\n]")
+	indent := detectIndentation(raw)
+	if indent != "  " {
+		t.Errorf("got %q, want %q", indent, "  ")
+	}
+}

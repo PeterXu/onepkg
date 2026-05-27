@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"strconv"
 	"strings"
 )
@@ -60,4 +62,27 @@ func splitKeyPath(key string) []string {
 		return nil
 	}
 	return strings.Split(key, ".")
+}
+
+// detectIndentation examines raw JSON bytes to determine indentation style.
+// Returns the indentation string (e.g., "  ", "    ", "\t").
+// Defaults to 2-space if no indentation is detected.
+func detectIndentation(raw []byte) string {
+	scanner := bufio.NewScanner(bytes.NewReader(raw))
+	for scanner.Scan() {
+		line := scanner.Text()
+		trimmed := strings.TrimLeft(line, " \t")
+		if trimmed == "" {
+			continue
+		}
+		if trimmed == "{" || trimmed == "[" || trimmed == "}" || trimmed == "]" {
+			continue
+		}
+		// Found a content line — extract leading whitespace
+		indent := line[:len(line)-len(trimmed)]
+		if indent != "" {
+			return indent
+		}
+	}
+	return "  " // default
 }
