@@ -12,6 +12,11 @@ type DirSpec struct {
 	Mode  string
 }
 
+type OverlaySpec struct {
+	System string
+	Item   string
+}
+
 type ShellConfig struct {
 	Name           string
 	Version        string
@@ -24,6 +29,7 @@ type ShellConfig struct {
 	ServiceType    string
 	ServiceName    string
 	Dirs           []DirSpec
+	Overlays       []OverlaySpec
 }
 
 func GenerateShellInstaller(cfg ShellConfig) (string, error) {
@@ -46,6 +52,11 @@ func GenerateShellInstaller(cfg ShellConfig) (string, error) {
 		fmt.Fprintf(&b, "DIR_%d_OWNER=%q\n", i, d.Owner)
 		fmt.Fprintf(&b, "DIR_%d_GROUP=%q\n", i, d.Group)
 		fmt.Fprintf(&b, "DIR_%d_MODE=%q\n", i, d.Mode)
+	}
+	fmt.Fprintf(&b, "OVERLAY_COUNT=%d\n", len(cfg.Overlays))
+	for i, o := range cfg.Overlays {
+		fmt.Fprintf(&b, "OVERLAY_%d_SYSTEM=%q\n", i, o.System)
+		fmt.Fprintf(&b, "OVERLAY_%d_ITEM=%q\n", i, o.Item)
 	}
 	b.WriteString("\n")
 
@@ -141,6 +152,28 @@ create_dirs() {
     done
 }
 
+apply_overlays() {
+    local install_dir="$1"
+
+    if [ "$OVERLAY_COUNT" -eq 0 ]; then
+        return
+    fi
+
+    for i in $(seq 0 $((OVERLAY_COUNT - 1))); do
+        local _var="OVERLAY_${i}_SYSTEM"; local sys_path="${!_var}"
+        local _var="OVERLAY_${i}_ITEM"; local item_path="${!_var}"
+
+        if [ -e "$sys_path" ]; then
+            echo "Overlay: using system $sys_path -> $item_path"
+            if [ -d "$sys_path" ]; then
+                cp -r "$sys_path/." "$install_dir/$item_path/"
+            else
+                cp "$sys_path" "$install_dir/$item_path"
+            fi
+        fi
+    done
+}
+
 `)
 	b.WriteString(`cmd_install() {
     check_arch
@@ -169,6 +202,9 @@ create_dirs() {
 
     echo "Installing $PKG_NAME $PKG_VERSION to $install_dir..."
     echo "$PAYLOAD" | base64 -d | tar xzf - -C "$install_dir"
+
+    # Apply system overlays
+    apply_overlays "$install_dir"
 
     echo "$VERSION_B64" | base64 -d > "$install_dir/VERSION"
 

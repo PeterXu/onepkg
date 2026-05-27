@@ -186,3 +186,72 @@ func TestGenerateShellInstallerNoDirs(t *testing.T) {
 		t.Error("output should have DIRS_COUNT=0 for empty dirs")
 	}
 }
+
+func TestGenerateShellInstallerWithOverlays(t *testing.T) {
+	cfg := ShellConfig{
+		Name:           "myapp",
+		Version:        "v1.0.0",
+		Platform:       "linux-arm64",
+		ExpectedArch:   "aarch64",
+		DefaultDir:     "/usr/local/myapp",
+		PayloadBase64:  "dGVzdA==",
+		VersionContent: "dGVzdA==",
+		ServiceType:    "none",
+		ServiceName:    "",
+		Overlays: []OverlaySpec{
+			{System: "/etc/agent/test1.txt", Item: "data/test1.txt"},
+			{System: "/etc/certs", Item: "data/certs"},
+		},
+	}
+
+	output, err := GenerateShellInstaller(cfg)
+	if err != nil {
+		t.Fatalf("GenerateShellInstaller returned error: %v", err)
+	}
+
+	if !strings.Contains(output, "OVERLAY_COUNT=2") {
+		t.Error("output missing OVERLAY_COUNT=2")
+	}
+	if !strings.Contains(output, `OVERLAY_0_SYSTEM="/etc/agent/test1.txt"`) {
+		t.Error("output missing OVERLAY_0_SYSTEM")
+	}
+	if !strings.Contains(output, `OVERLAY_0_ITEM="data/test1.txt"`) {
+		t.Error("output missing OVERLAY_0_ITEM")
+	}
+	if !strings.Contains(output, `OVERLAY_1_SYSTEM="/etc/certs"`) {
+		t.Error("output missing OVERLAY_1_SYSTEM")
+	}
+	if !strings.Contains(output, `OVERLAY_1_ITEM="data/certs"`) {
+		t.Error("output missing OVERLAY_1_ITEM")
+	}
+	if !strings.Contains(output, "apply_overlays()") {
+		t.Error("output missing apply_overlays function")
+	}
+	if !strings.Contains(output, `apply_overlays "$install_dir"`) {
+		t.Error("output missing apply_overlays call in cmd_install")
+	}
+}
+
+func TestGenerateShellInstallerNoOverlays(t *testing.T) {
+	cfg := ShellConfig{
+		Name:           "myapp",
+		Version:        "v1.0.0",
+		Platform:       "linux-arm64",
+		ExpectedArch:   "aarch64",
+		DefaultDir:     "/usr/local/myapp",
+		PayloadBase64:  "dGVzdA==",
+		VersionContent: "dGVzdA==",
+		ServiceType:    "none",
+		ServiceName:    "",
+		Overlays:       []OverlaySpec{},
+	}
+
+	output, err := GenerateShellInstaller(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(output, "OVERLAY_COUNT=0") {
+		t.Error("output should have OVERLAY_COUNT=0 for empty overlays")
+	}
+}
