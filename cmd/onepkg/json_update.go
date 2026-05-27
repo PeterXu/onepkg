@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"strconv"
 	"strings"
 )
@@ -85,4 +86,30 @@ func detectIndentation(raw []byte) string {
 		}
 	}
 	return "  " // default
+}
+
+// formatJSONValue converts a Go value to its JSON literal string representation.
+func formatJSONValue(v interface{}) string {
+	switch val := v.(type) {
+	case nil:
+		return "null"
+	case bool:
+		if val {
+			return "true"
+		}
+		return "false"
+	case int64:
+		return strconv.FormatInt(val, 10)
+	case float64:
+		return strconv.FormatFloat(val, 'f', -1, 64)
+	case string:
+		escaped := strings.ReplaceAll(val, `\`, `\\`)
+		escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+		escaped = strings.ReplaceAll(escaped, "\n", `\n`)
+		escaped = strings.ReplaceAll(escaped, "\t", `\t`)
+		escaped = strings.ReplaceAll(escaped, "\r", `\r`)
+		return `"` + escaped + `"`
+	default:
+		return fmt.Sprintf("%v", val)
+	}
 }

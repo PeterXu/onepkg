@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"testing"
 )
 
@@ -179,5 +180,33 @@ func TestDetectIndentation_Array(t *testing.T) {
 	indent := detectIndentation(raw)
 	if indent != "  " {
 		t.Errorf("got %q, want %q", indent, "  ")
+	}
+}
+
+func TestFormatJSONValue(t *testing.T) {
+	tests := []struct {
+		input    interface{}
+		expected string
+	}{
+		{nil, "null"},
+		{true, "true"},
+		{false, "false"},
+		{int64(42), "42"},
+		{int64(-1), "-1"},
+		{float64(3.14), "3.14"},
+		{"hello", `"hello"`},
+		{`say "hi"`, `"say \"hi\""`},
+		{"line1\nline2", `"line1\nline2"`},
+		{"tab\there", `"tab\there"`},
+		{`back\slash`, `"back\\slash"`},
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%v", tt.input), func(t *testing.T) {
+			result := formatJSONValue(tt.input)
+			if result != tt.expected {
+				t.Errorf("formatJSONValue(%v) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
 	}
 }
