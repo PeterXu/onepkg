@@ -209,11 +209,13 @@ func getValueFromTree(tree *toml.Tree, key string) interface{} {
 }
 
 // replaceValueInContent replaces the old value with the new value in raw TOML content.
-// It finds the line containing oldStr as the value and replaces it with newStr,
-// preserving comments, whitespace, and all other content.
+// It navigates to the correct section for nested/array keys before replacing.
 func replaceValueInContent(content string, key string, oldStr string, newStr string) string {
-	// Find the key's leaf name (last non-numeric part)
 	parts := strings.Split(key, ".")
+
+	// Build the path of non-index parts to find the right section
+	// e.g. "dirs.0.owner" → navigate to second [[dirs]], then match "owner"
+	sectionPath := make([]string, 0, len(parts))
 	leafKey := parts[len(parts)-1]
 	for _, p := range parts {
 		if _, err := strconv.Atoi(p); err != nil {
@@ -221,9 +223,69 @@ func replaceValueInContent(content string, key string, oldStr string, newStr str
 		}
 	}
 
-	// For top-level keys or when there's only one occurrence, do a simple line match
-	// Match: <whitespace><key><whitespace>=<whitespace><value><rest of line>
-	pattern := `(?m)^(\s*` + regexp.QuoteMeta(leafKey) + `\s*=\s*)` +
+	// Collect section headers to navigate to
+	for i := 0; i < len(parts); i++ {
+		if _, err := strconv.Atoi(parts[i]); err == nil {
+			continue // skip numeric indices
+		}
+		if i < len(parts)-1 {
+			// Check if next is numeric (array of tables)
+			if idx, err := strconv.Atoi(parts[i+1]); err == nil {
+				sectionPath = append(sectionPath, "[["+parts[i]+"]]")
+				// Count which occurrence (idx) we need
+				_ = idx
+			} else {
+				sectionPath = append(sectionPath, "["+parts[i]+"]")
+			}
+		}
+	}
+
+	// Find the section in content and replace within it
+	if len(sectionPath) == 0 {
+		// Top-level key: match anywhere
+		return replaceLine(content, leafKey, oldStr, newStr)
+	}
+
+	// Navigate to section, then replace within that scope
+	scopeStart := 0
+	for _, header := range sectionPath {
+		idx := strings.Index(content[scopeStart:], "\n"+header)
+		if idx == -1 {
+			// Try without leading newline (file start)
+			if strings.HasPrefix(content[scopeStart:], header) {
+				idx = 0
+			} else {
+				break
+			}
+		} else {
+			idx++ // skip the newline
+		}
+		scopeStart += idx + len(header)
+	}
+
+	if scopeStart >= len(content) {
+		scopeStart = 0 // fallback to full content
+	}
+
+	// Find the next section boundary (line starting with [) to limit scope
+	scopeEnd := len(content)
+	nextSection := regexp.MustCompile(`(?m)^\[`).FindStringIndex(content[scopeStart:])
+	if nextSection != nil && nextSection[0] > 0 {
+		scopeEnd = scopeStart + nextSection[0]
+	}
+
+	// Replace within the scoped section
+	before := content[:scopeStart]
+	scoped := content[scopeStart:scopeEnd]
+	after := content[scopeEnd:]
+
+	replaced := replaceLine(scoped, leafKey, oldStr, newStr)
+	return before + replaced + after
+}
+
+// replaceLine replaces a single key=value line in content.
+func replaceLine(content string, key string, oldStr string, newStr string) string {
+	pattern := `(?m)^(\s*` + regexp.QuoteMeta(key) + `\s*=\s*)` +
 		regexp.QuoteMeta(oldStr) + `(.*)$`
 
 	re := regexp.MustCompile(pattern)
@@ -249,7 +311,11 @@ func formatTOMLValue(v interface{}) string {
 	case float64:
 		return strconv.FormatFloat(val, 'f', -1, 64)
 	case string:
-		return `"` + val + `"`
+		escaped := strings.ReplaceAll(val, `\`, `\\`)
+		escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+		escaped = strings.ReplaceAll(escaped, "\n", `\n`)
+		escaped = strings.ReplaceAll(escaped, "\t", `\t`)
+		return `"` + escaped + `"`
 	default:
 		return fmt.Sprintf("%v", val)
 	}

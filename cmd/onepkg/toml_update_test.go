@@ -242,3 +242,70 @@ func TestRunTomlUpdate_FormatPreservation(t *testing.T) {
 		t.Errorf("name not updated, got: %s", s)
 	}
 }
+
+func TestRunTomlUpdate_NestedKeyCollision(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.toml"
+	content := "# header\nname = \"toplevel\"\n\n[services]\nname = \"svcname\"\n"
+	os.WriteFile(path, []byte(content), 0644)
+
+	err := runTomlUpdate([]string{"services.name", "new", path})
+	if err != nil {
+		t.Fatalf("runTomlUpdate: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	s := string(data)
+	if !strings.Contains(s, `name = "toplevel"`) {
+		t.Errorf("top-level name should be unchanged, got: %s", s)
+	}
+	if !strings.Contains(s, `name = "new"`) {
+		t.Errorf("services.name should be updated, got: %s", s)
+	}
+	if !strings.Contains(s, "# header") {
+		t.Error("comment not preserved")
+	}
+}
+
+func TestRunTomlUpdate_StringWithQuotes(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.toml"
+	os.WriteFile(path, []byte(`msg = "hello world"`+"\n"), 0644)
+
+	err := runTomlUpdate([]string{"msg", `say "hi"`, path})
+	if err != nil {
+		t.Fatalf("runTomlUpdate: %v", err)
+	}
+
+	tree, err := toml.LoadFile(path)
+	if err != nil {
+		t.Fatalf("result is not valid TOML: %v\ncontent: %s", err, mustRead(path))
+	}
+	if tree.Get("msg") != `say "hi"` {
+		t.Errorf("msg = %v, want %q", tree.Get("msg"), `say "hi"`)
+	}
+}
+
+func TestRunTomlUpdate_StringWithBackslash(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.toml"
+	os.WriteFile(path, []byte(`path = "/usr/bin"`+"\n"), 0644)
+
+	err := runTomlUpdate([]string{"path", `C:\Users\test`, path})
+	if err != nil {
+		t.Fatalf("runTomlUpdate: %v", err)
+	}
+
+	tree, err := toml.LoadFile(path)
+	if err != nil {
+		t.Fatalf("result is not valid TOML: %v\ncontent: %s", err, mustRead(path))
+	}
+	if tree.Get("path") != `C:\Users\test` {
+		t.Errorf("path = %v, want %q", tree.Get("path"), `C:\Users\test`)
+	}
+}
+
+func mustRead(path string) string {
+	data, _ := os.ReadFile(path)
+	return string(data)
+}
