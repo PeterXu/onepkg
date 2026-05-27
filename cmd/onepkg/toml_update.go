@@ -65,79 +65,178 @@ func tomlUpdateCore(args []string, allowAdd bool) error {
 		return fmt.Errorf("key %q does not exist (use --add to insert)", key)
 	}
 
-	// For existing keys: do targeted text replacement to preserve formatting
+	newStr := formatTOMLValue(newVal)
+
 	if existed {
 		oldVal := getValueFromTree(tree, key)
-		if oldVal != nil {
-			result := replaceValueInContent(string(raw), key, formatTOMLValue(oldVal), formatTOMLValue(newVal))
-			if result != string(raw) {
-				return os.WriteFile(filePath, []byte(result), 0644)
-			}
+		if oldVal == nil {
+			return fmt.Errorf("key %q exists but value cannot be retrieved", key)
 		}
+		oldStr := formatTOMLValue(oldVal)
+		result := replaceValueInContent(string(raw), key, oldStr, newStr)
+		if result == string(raw) {
+			return fmt.Errorf("could not update key %q in-place", key)
+		}
+		return os.WriteFile(filePath, []byte(result), 0644)
 	}
 
-	// For new keys or fallback: modify tree and re-serialize
-	if err := setKey(tree, key, newVal, allowAdd); err != nil {
+	// --add new key: text-based append (no re-serialization)
+	result, err := appendKeyToContent(string(raw), key, newStr)
+	if err != nil {
 		return err
 	}
-
-	var buf strings.Builder
-	if _, err := tree.WriteTo(&buf); err != nil {
-		return fmt.Errorf("encode: %w", err)
-	}
-	return os.WriteFile(filePath, []byte(buf.String()), 0644)
+	return os.WriteFile(filePath, []byte(result), 0644)
 }
 
-// setKey sets a value at the given dotted key path, handling array indices.
-func setKey(tree *toml.Tree, key string, value interface{}, allowAdd bool) error {
-	parts := strings.Split(key, ".")
-	current := interface{}(tree)
+// sectionTarget represents a TOML section header to navigate to.
+type sectionTarget struct {
+	header string // e.g. "[[dirs]]" or "[services]"
+	index  int    // array occurrence index (0-based); 0 for non-array sections
+}
 
+// parseSectionTargets builds the navigation targets from dotted key parts.
+func parseSectionTargets(parts []string) []sectionTarget {
+	var targets []sectionTarget
 	for i := 0; i < len(parts); i++ {
-		part := parts[i]
-		isLast := i == len(parts)-1
-
-		switch v := current.(type) {
-		case *toml.Tree:
-			if isLast {
-				if !v.Has(part) && !allowAdd {
-					return fmt.Errorf("key %q does not exist (use --add to insert)", key)
-				}
-				v.Set(part, value)
-				return nil
+		if _, err := strconv.Atoi(parts[i]); err == nil {
+			continue
+		}
+		if i < len(parts)-1 {
+			if idx, err := strconv.Atoi(parts[i+1]); err == nil {
+				targets = append(targets, sectionTarget{"[[" + parts[i] + "]]", idx})
+			} else {
+				targets = append(targets, sectionTarget{"[" + parts[i] + "]", 0})
 			}
-			nextIdx, nextErr := strconv.Atoi(parts[i+1])
-			if nextErr == nil {
-				arr := v.Get(part)
-				arrTrees, ok := arr.([]*toml.Tree)
-				if !ok {
-					return fmt.Errorf("key %q is not an array of tables", strings.Join(parts[:i+1], "."))
-				}
-				if nextIdx < 0 || nextIdx >= len(arrTrees) {
-					return fmt.Errorf("index %d out of range for %q (length %d)", nextIdx, strings.Join(parts[:i+1], "."), len(arrTrees))
-				}
-				current = arrTrees[nextIdx]
-				i++
+		}
+	}
+	return targets
+}
+
+// findSectionRange finds the content range [start, end) for the section
+// identified by the given key parts. For array indices, navigates to the
+// Nth occurrence. Returns (-1, -1) if the section is not found.
+func findSectionRange(content string, parts []string) (int, int) {
+	targets := parseSectionTargets(parts)
+	if len(targets) == 0 {
+		return 0, len(content)
+	}
+
+	pos := 0
+	for _, target := range targets {
+		for occ := 0; occ <= target.index; occ++ {
+			// Check if header is at current position (e.g., start of file)
+			if strings.HasPrefix(content[pos:], target.header) {
+				pos += len(target.header)
 				continue
 			}
-			next := v.Get(part)
-			if next == nil {
-				if allowAdd {
-					newTree := toml.Tree{}
-					v.Set(part, &newTree)
-					current = &newTree
-				} else {
-					return fmt.Errorf("key %q does not exist (use --add to insert)", strings.Join(parts[:i+1], "."))
-				}
-			} else {
-				current = next
+			idx := strings.Index(content[pos:], "\n"+target.header)
+			if idx == -1 {
+				return -1, -1
 			}
-		default:
-			return fmt.Errorf("key %q is not a table", strings.Join(parts[:i], "."))
+			pos += idx + 1 + len(target.header) // skip \n + header
 		}
 	}
 
-	return nil
+	// pos is right after the last section header.
+	// Find end: next [ or [[ header, or EOF.
+	sectionEnd := len(content)
+	nextHeader := regexp.MustCompile(`(?m)^\[`).FindStringIndex(content[pos:])
+	if nextHeader != nil && nextHeader[0] > 0 {
+		sectionEnd = pos + nextHeader[0]
+	}
+
+	return pos, sectionEnd
+}
+
+// replaceValueInContent replaces the old value with the new value in raw TOML
+// content, navigating to the correct section for nested/array keys.
+func replaceValueInContent(content string, key string, oldStr string, newStr string) string {
+	parts := strings.Split(key, ".")
+	leafKey := parts[len(parts)-1]
+
+	scopeStart, scopeEnd := findSectionRange(content, parts)
+	if scopeStart == -1 {
+		// No section header found — try the full dotted key as a single line
+		// (e.g., "log.to = ..." without a [log] section header)
+		return replaceLine(content, key, oldStr, newStr)
+	}
+
+	before := content[:scopeStart]
+	scoped := content[scopeStart:scopeEnd]
+	after := content[scopeEnd:]
+
+	replaced := replaceLine(scoped, leafKey, oldStr, newStr)
+	return before + replaced + after
+}
+
+// appendKeyToContent appends a new key=value line at the correct position
+// in the file, without re-serializing the entire TOML tree.
+func appendKeyToContent(content string, key string, value string) (string, error) {
+	parts := strings.Split(key, ".")
+	leafKey := parts[len(parts)-1]
+	newLine := leafKey + " = " + value
+
+	// Top-level key: append to end of file
+	if len(parts) == 1 {
+		if !strings.HasSuffix(content, "\n") {
+			content += "\n"
+		}
+		return content + newLine + "\n", nil
+	}
+
+	// Navigate to the parent section
+	parentParts := parts[:len(parts)-1]
+	scopeStart, scopeEnd := findSectionRange(content, parentParts)
+	if scopeStart == -1 {
+		return "", fmt.Errorf("parent section for key %q not found", key)
+	}
+
+	before := content[:scopeEnd]
+	after := content[scopeEnd:]
+
+	if !strings.HasSuffix(before, "\n") {
+		before += "\n"
+	}
+
+	return before + newLine + "\n" + after, nil
+}
+
+// replaceLine replaces a single key=value line in content.
+func replaceLine(content string, key string, oldStr string, newStr string) string {
+	pattern := `(?m)^(\s*` + regexp.QuoteMeta(key) + `\s*=\s*)` +
+		regexp.QuoteMeta(oldStr) + `(.*)$`
+
+	re := regexp.MustCompile(pattern)
+	return re.ReplaceAllStringFunc(content, func(match string) string {
+		subs := re.FindStringSubmatch(match)
+		if subs == nil {
+			return match
+		}
+		return subs[1] + newStr + subs[2]
+	})
+}
+
+// formatTOMLValue formats a Go value as a TOML value string.
+func formatTOMLValue(v interface{}) string {
+	switch val := v.(type) {
+	case bool:
+		if val {
+			return "true"
+		}
+		return "false"
+	case int64:
+		return strconv.FormatInt(val, 10)
+	case float64:
+		return strconv.FormatFloat(val, 'f', -1, 64)
+	case string:
+		escaped := strings.ReplaceAll(val, `\`, `\\`)
+		escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+		escaped = strings.ReplaceAll(escaped, "\n", `\n`)
+		escaped = strings.ReplaceAll(escaped, "\t", `\t`)
+		return `"` + escaped + `"`
+	default:
+		return fmt.Sprintf("%v", val)
+	}
 }
 
 // keyExistsInTree checks if a dotted key path exists in the tree.
@@ -206,117 +305,4 @@ func getValueFromTree(tree *toml.Tree, key string) interface{} {
 		}
 	}
 	return nil
-}
-
-// replaceValueInContent replaces the old value with the new value in raw TOML content.
-// It navigates to the correct section for nested/array keys before replacing.
-func replaceValueInContent(content string, key string, oldStr string, newStr string) string {
-	parts := strings.Split(key, ".")
-
-	// Build the path of non-index parts to find the right section
-	// e.g. "dirs.0.owner" → navigate to second [[dirs]], then match "owner"
-	sectionPath := make([]string, 0, len(parts))
-	leafKey := parts[len(parts)-1]
-	for _, p := range parts {
-		if _, err := strconv.Atoi(p); err != nil {
-			leafKey = p
-		}
-	}
-
-	// Collect section headers to navigate to
-	for i := 0; i < len(parts); i++ {
-		if _, err := strconv.Atoi(parts[i]); err == nil {
-			continue // skip numeric indices
-		}
-		if i < len(parts)-1 {
-			// Check if next is numeric (array of tables)
-			if idx, err := strconv.Atoi(parts[i+1]); err == nil {
-				sectionPath = append(sectionPath, "[["+parts[i]+"]]")
-				// Count which occurrence (idx) we need
-				_ = idx
-			} else {
-				sectionPath = append(sectionPath, "["+parts[i]+"]")
-			}
-		}
-	}
-
-	// Find the section in content and replace within it
-	if len(sectionPath) == 0 {
-		// Top-level key: match anywhere
-		return replaceLine(content, leafKey, oldStr, newStr)
-	}
-
-	// Navigate to section, then replace within that scope
-	scopeStart := 0
-	for _, header := range sectionPath {
-		idx := strings.Index(content[scopeStart:], "\n"+header)
-		if idx == -1 {
-			// Try without leading newline (file start)
-			if strings.HasPrefix(content[scopeStart:], header) {
-				idx = 0
-			} else {
-				break
-			}
-		} else {
-			idx++ // skip the newline
-		}
-		scopeStart += idx + len(header)
-	}
-
-	if scopeStart >= len(content) {
-		scopeStart = 0 // fallback to full content
-	}
-
-	// Find the next section boundary (line starting with [) to limit scope
-	scopeEnd := len(content)
-	nextSection := regexp.MustCompile(`(?m)^\[`).FindStringIndex(content[scopeStart:])
-	if nextSection != nil && nextSection[0] > 0 {
-		scopeEnd = scopeStart + nextSection[0]
-	}
-
-	// Replace within the scoped section
-	before := content[:scopeStart]
-	scoped := content[scopeStart:scopeEnd]
-	after := content[scopeEnd:]
-
-	replaced := replaceLine(scoped, leafKey, oldStr, newStr)
-	return before + replaced + after
-}
-
-// replaceLine replaces a single key=value line in content.
-func replaceLine(content string, key string, oldStr string, newStr string) string {
-	pattern := `(?m)^(\s*` + regexp.QuoteMeta(key) + `\s*=\s*)` +
-		regexp.QuoteMeta(oldStr) + `(.*)$`
-
-	re := regexp.MustCompile(pattern)
-	return re.ReplaceAllStringFunc(content, func(match string) string {
-		subs := re.FindStringSubmatch(match)
-		if subs == nil {
-			return match
-		}
-		return subs[1] + newStr + subs[2]
-	})
-}
-
-// formatTOMLValue formats a Go value as a TOML value string.
-func formatTOMLValue(v interface{}) string {
-	switch val := v.(type) {
-	case bool:
-		if val {
-			return "true"
-		}
-		return "false"
-	case int64:
-		return strconv.FormatInt(val, 10)
-	case float64:
-		return strconv.FormatFloat(val, 'f', -1, 64)
-	case string:
-		escaped := strings.ReplaceAll(val, `\`, `\\`)
-		escaped = strings.ReplaceAll(escaped, `"`, `\"`)
-		escaped = strings.ReplaceAll(escaped, "\n", `\n`)
-		escaped = strings.ReplaceAll(escaped, "\t", `\t`)
-		return `"` + escaped + `"`
-	default:
-		return fmt.Sprintf("%v", val)
-	}
 }

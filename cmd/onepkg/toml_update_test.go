@@ -156,6 +156,42 @@ func TestRunTomlUpdate_Add_NewKey(t *testing.T) {
 	}
 }
 
+func TestRunTomlUpdate_Add_PreservesFormat(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.toml"
+	content := "# header\nname = \"old\"\nversion = \"v1\"\n\n[services]\nname = \"svc\"\n"
+	os.WriteFile(path, []byte(content), 0644)
+
+	err := runTomlUpdateAdd([]string{"newkey", "newval", path})
+	if err != nil {
+		t.Fatalf("runTomlUpdateAdd: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	s := string(data)
+	if !strings.Contains(s, "# header") {
+		t.Error("comment not preserved after --add")
+	}
+	if !strings.Contains(s, `version = "v1"`) {
+		t.Error("version not preserved after --add")
+	}
+	if !strings.Contains(s, `name = "svc"`) {
+		t.Error("services.name not preserved after --add")
+	}
+	if !strings.Contains(s, `newkey = "newval"`) {
+		t.Errorf("new key not added, got: %s", s)
+	}
+	// Ensure original order is preserved (name before version)
+	nameIdx := strings.Index(s, `name = "old"`)
+	versionIdx := strings.Index(s, `version = "v1"`)
+	if nameIdx == -1 || versionIdx == -1 {
+		t.Fatalf("missing original keys, got: %s", s)
+	}
+	if nameIdx > versionIdx {
+		t.Error("key order not preserved after --add")
+	}
+}
+
 func TestRunTomlUpdate_Add_ExistingKey(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/test.toml"
@@ -200,6 +236,34 @@ owner = "app"
 	}
 	if arr[1].Get("owner") != "app" {
 		t.Errorf("dirs.1.owner should be unchanged, got %v", arr[1].Get("owner"))
+	}
+}
+
+func TestRunTomlUpdate_ArraySecondElement(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.toml"
+	content := `[[dirs]]
+path = "/var/log"
+owner = "root"
+
+[[dirs]]
+path = "/var/lib"
+owner = "app"
+`
+	os.WriteFile(path, []byte(content), 0644)
+
+	err := runTomlUpdate([]string{"dirs.1.owner", "nobody", path})
+	if err != nil {
+		t.Fatalf("runTomlUpdate: %v", err)
+	}
+
+	tree, _ := toml.LoadFile(path)
+	arr := tree.Get("dirs").([]*toml.Tree)
+	if arr[0].Get("owner") != "root" {
+		t.Errorf("dirs.0.owner should be unchanged, got %v", arr[0].Get("owner"))
+	}
+	if arr[1].Get("owner") != "nobody" {
+		t.Errorf("dirs.1.owner = %v, want nobody", arr[1].Get("owner"))
 	}
 }
 
@@ -302,6 +366,33 @@ func TestRunTomlUpdate_StringWithBackslash(t *testing.T) {
 	}
 	if tree.Get("path") != `C:\Users\test` {
 		t.Errorf("path = %v, want %q", tree.Get("path"), `C:\Users\test`)
+	}
+}
+
+func TestRunTomlUpdate_DottedInlineKey(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.toml"
+	content := `server = "https://example.com"
+log.to = "file"
+log.level = "info"
+`
+	os.WriteFile(path, []byte(content), 0644)
+
+	err := runTomlUpdate([]string{"log.to", "stdout", path})
+	if err != nil {
+		t.Fatalf("runTomlUpdate: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	s := string(data)
+	if !strings.Contains(s, `log.to = "stdout"`) {
+		t.Errorf("log.to not updated, got: %s", s)
+	}
+	if !strings.Contains(s, `log.level = "info"`) {
+		t.Error("log.level should be unchanged")
+	}
+	if !strings.Contains(s, `server = "https://example.com"`) {
+		t.Error("server should be unchanged")
 	}
 }
 
