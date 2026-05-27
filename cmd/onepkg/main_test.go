@@ -136,3 +136,94 @@ after = ["network.target"]
 		t.Fatal(err)
 	}
 }
+
+func TestBuildPackageWithOverlay(t *testing.T) {
+	projectDir := t.TempDir()
+
+	binDir := filepath.Join(projectDir, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	dataDir := filepath.Join(projectDir, "data")
+	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(binDir, "app"), []byte("#!/bin/sh\necho hello"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, "config.txt"), []byte("key=value"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	configContent := `
+name = "testapp"
+version = "v1.0.0"
+output_dir = "packages"
+
+items = ["bin/app", "data/config.txt"]
+
+[[system_overlay]]
+system = "/etc/testapp/config.txt"
+item = "data/config.txt"
+`
+	configPath := filepath.Join(projectDir, "config.toml")
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := ParseConfig(configPath)
+	if err != nil {
+		t.Fatalf("ParseConfig: %v", err)
+	}
+	cfg.ApplyDefaults()
+	if err := cfg.Validate(projectDir); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+
+	resolved, err := ResolveItems(projectDir, cfg.Items, "linux-amd64")
+	if err != nil {
+		t.Fatalf("ResolveItems: %v", err)
+	}
+	entries, err := CollectFilesResolved(projectDir, resolved, cfg.Exclude)
+	if err != nil {
+		t.Fatalf("CollectFilesResolved: %v", err)
+	}
+
+	tarData, err := BuildTarGZ(entries, true)
+	if err != nil {
+		t.Fatalf("BuildTarGZ: %v", err)
+	}
+
+	shaMap := make(map[string]string)
+	for _, e := range entries {
+		shaMap[e.RelPath] = e.SHA1
+	}
+
+	outputDir := filepath.Join(projectDir, cfg.OutputDir)
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := BuildForPlatform(cfg, "linux-amd64", entries, tarData, shaMap, outputDir); err != nil {
+		t.Fatalf("BuildForPlatform: %v", err)
+	}
+
+	scriptBytes, err := os.ReadFile(filepath.Join(outputDir, "testapp_v1.0.0_linux_amd64.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(scriptBytes)
+
+	if !strings.Contains(script, "OVERLAY_COUNT=1") {
+		t.Error("installer should have OVERLAY_COUNT=1")
+	}
+	if !strings.Contains(script, `OVERLAY_0_SYSTEM="/etc/testapp/config.txt"`) {
+		t.Error("installer should have OVERLAY_0_SYSTEM")
+	}
+	if !strings.Contains(script, `OVERLAY_0_ITEM="data/config.txt"`) {
+		t.Error("installer should have OVERLAY_0_ITEM")
+	}
+	if !strings.Contains(script, "apply_overlays") {
+		t.Error("installer should have apply_overlays function")
+	}
+}

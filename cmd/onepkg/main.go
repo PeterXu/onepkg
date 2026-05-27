@@ -241,6 +241,15 @@ func BuildForPlatform(cfg *Config, platform string, entries []FileEntry, tarData
 		})
 	}
 
+	// Convert OverlayConfig to OverlaySpec
+	var overlays []installer.OverlaySpec
+	for _, o := range cfg.SystemOverlay {
+		overlays = append(overlays, installer.OverlaySpec{
+			System: o.System,
+			Item:   o.Item,
+		})
+	}
+
 	shellCfg := installer.ShellConfig{
 		Name:           cfg.Name,
 		Version:        cfg.Version,
@@ -253,6 +262,7 @@ func BuildForPlatform(cfg *Config, platform string, entries []FileEntry, tarData
 		ServiceType:    serviceType,
 		ServiceName:    serviceName,
 		Dirs:           dirs,
+		Overlays:       overlays,
 	}
 
 	script, err := installer.GenerateShellInstaller(shellCfg)
