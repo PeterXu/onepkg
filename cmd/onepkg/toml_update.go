@@ -183,6 +183,7 @@ func replaceValueInContent(content string, key string, oldStr string, newStr str
 // appendKeyToContent appends a new key=value line at the correct position
 // in the file, without re-serializing the entire TOML tree.
 // It preserves comments and blank lines that precede section headers.
+// Supports both section headers ([log]) and inline dotted keys (log.to).
 func appendKeyToContent(content string, key string, value string) (string, error) {
 	parts := strings.Split(key, ".")
 	leafKey := parts[len(parts)-1]
@@ -199,25 +200,56 @@ func appendKeyToContent(content string, key string, value string) (string, error
 		return before + newLine + "\n" + after, nil
 	}
 
-	// Navigate to the parent section.
-	// Replace leaf key with empty string so parseSectionTargets processes
-	// all section parts (otherwise it skips the last, assuming it's a leaf key).
+	// Try section header approach first.
 	navParts := make([]string, len(parts))
 	copy(navParts, parts)
 	navParts[len(parts)-1] = ""
 	scopeStart, scopeEnd := findSectionRange(content, navParts)
-	if scopeStart == -1 {
+	if scopeStart != -1 {
+		insertPos := findInsertionPointBeforeSection(content, scopeEnd)
+		before := content[:insertPos]
+		after := content[insertPos:]
+		if !strings.HasSuffix(before, "\n") {
+			before += "\n"
+		}
+		return before + newLine + "\n" + after, nil
+	}
+
+	// Fallback: inline dotted keys (e.g. log.to = "stdout" without [log] header).
+	parentPrefix := strings.Join(parts[:len(parts)-1], ".") + "."
+	insertPos := findLastDottedKeyLine(content, parentPrefix)
+	if insertPos == -1 {
 		return "", fmt.Errorf("parent section for key %q not found", key)
 	}
 
-	insertPos := findInsertionPointBeforeSection(content, scopeEnd)
+	fullDottedLine := key + " = " + value
 	before := content[:insertPos]
 	after := content[insertPos:]
 	if !strings.HasSuffix(before, "\n") {
 		before += "\n"
 	}
+	return before + fullDottedLine + "\n" + after, nil
+}
 
-	return before + newLine + "\n" + after, nil
+// findLastDottedKeyLine scans content for lines starting with the given prefix
+// and returns the byte offset right after the last matching line.
+// Returns -1 if no matching lines are found.
+func findLastDottedKeyLine(content string, prefix string) int {
+	pattern := `(?m)^\s*` + regexp.QuoteMeta(prefix)
+	re := regexp.MustCompile(pattern)
+
+	matches := re.FindAllStringIndex(content, -1)
+	if len(matches) == 0 {
+		return -1
+	}
+
+	lastMatch := matches[len(matches)-1]
+	rest := content[lastMatch[0]:]
+	nlIdx := strings.Index(rest, "\n")
+	if nlIdx == -1 {
+		return len(content)
+	}
+	return lastMatch[0] + nlIdx + 1
 }
 
 // findTopLevelInsertPoint finds where to insert a top-level key:

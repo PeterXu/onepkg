@@ -545,6 +545,103 @@ func TestRunTomlUpdate_Add_SectionKeyBeforeNextSectionComment(t *testing.T) {
 	}
 }
 
+func TestRunTomlUpdate_Add_DottedInlineKey(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.toml"
+	content := `server = "https://example.com"
+agent_id = "test001"
+
+# logger
+log.to = "stdout"
+log.level = "info"
+log.file = "/var/log/agent.log"
+`
+	os.WriteFile(path, []byte(content), 0644)
+
+	err := runTomlUpdateAdd([]string{"log.group2", "test2", path})
+	if err != nil {
+		t.Fatalf("runTomlUpdateAdd: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	s := string(data)
+
+	tree, err := toml.Load(s)
+	if err != nil {
+		t.Fatalf("result is not valid TOML: %v\ncontent: %s", err, s)
+	}
+	if tree.Get("log.group2") != "test2" {
+		t.Errorf("log.group2 = %v, want test2", tree.Get("log.group2"))
+	}
+	if tree.Get("log.level") != "info" {
+		t.Error("log.level should be unchanged")
+	}
+	if tree.Get("server") != "https://example.com" {
+		t.Error("server should be unchanged")
+	}
+
+	// The new key should appear after the last log.* key
+	lastLogIdx := strings.LastIndex(s, "log.file")
+	newKeyIdx := strings.Index(s, "log.group2")
+	if newKeyIdx < lastLogIdx {
+		t.Errorf("log.group2 should appear after last log.* key, got:\n%s", s)
+	}
+}
+
+func TestRunTomlUpdate_Add_DeepDottedInlineKey(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.toml"
+	content := `name = "myapp"
+a.b.x = "1"
+a.b.y = "2"
+`
+	os.WriteFile(path, []byte(content), 0644)
+
+	err := runTomlUpdateAdd([]string{"a.b.c", "three", path})
+	if err != nil {
+		t.Fatalf("runTomlUpdateAdd: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	s := string(data)
+
+	tree, err := toml.Load(s)
+	if err != nil {
+		t.Fatalf("result is not valid TOML: %v\ncontent: %s", err, s)
+	}
+	if tree.Get("a.b.c") != "three" {
+		t.Errorf("a.b.c = %v, want three", tree.Get("a.b.c"))
+	}
+}
+
+func TestRunTomlUpdate_Add_SectionHeaderPriorityOverInline(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.toml"
+	content := `name = "myapp"
+
+[log]
+to = "stdout"
+level = "info"
+`
+	os.WriteFile(path, []byte(content), 0644)
+
+	err := runTomlUpdateAdd([]string{"log.file", "/tmp/log", path})
+	if err != nil {
+		t.Fatalf("runTomlUpdateAdd: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	s := string(data)
+
+	// When section header exists, the leaf key is used (not dotted)
+	if strings.Contains(s, "log.file") {
+		t.Errorf("should use leaf key 'file' inside [log] section, not dotted 'log.file', got:\n%s", s)
+	}
+	if !strings.Contains(s, "file = \"/tmp/log\"") {
+		t.Errorf("file key not found in [log] section, got:\n%s", s)
+	}
+}
+
 func mustRead(path string) string {
 	data, _ := os.ReadFile(path)
 	return string(data)
