@@ -214,3 +214,31 @@ func TestRunTomlUpdate_ArrayElementIndexOutOfRange(t *testing.T) {
 		t.Error("expected error for out-of-range index")
 	}
 }
+
+func TestRunTomlUpdate_FormatPreservation(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.toml"
+	content := "# This is a comment\nname = \"old\"\nversion = \"v1.0.0\"\n\n[services]\nname = \"myservice\"\n"
+	os.WriteFile(path, []byte(content), 0644)
+
+	err := runTomlUpdate([]string{"name", "new", path})
+	if err != nil {
+		t.Fatalf("runTomlUpdate: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	s := string(data)
+
+	if !strings.Contains(s, "# This is a comment") {
+		t.Error("top-level comment not preserved")
+	}
+	if !strings.Contains(s, `version = "v1.0.0"`) {
+		t.Error("version not preserved")
+	}
+	if !strings.Contains(s, `name = "myservice"`) {
+		t.Error("services.name not preserved")
+	}
+	if !strings.Contains(s, `name = "new"`) {
+		t.Errorf("name not updated, got: %s", s)
+	}
+}
