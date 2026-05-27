@@ -628,6 +628,93 @@ func TestRunJsonUpdate_ArrayPrimitive(t *testing.T) {
 	}
 }
 
+func TestRunJsonUpdate_PreservesFieldOrder(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.json"
+	// Deliberately non-alphabetical order
+	os.WriteFile(path, []byte(`{"zebra": 1, "alpha": 2, "middle": 3}`), 0644)
+
+	err := runJsonUpdate([]string{"middle", "99", path})
+	if err != nil {
+		t.Fatalf("runJsonUpdate: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	s := string(data)
+
+	zebraIdx := strings.Index(s, `"zebra"`)
+	alphaIdx := strings.Index(s, `"alpha"`)
+	middleIdx := strings.Index(s, `"middle"`)
+
+	if zebraIdx == -1 || alphaIdx == -1 || middleIdx == -1 {
+		t.Fatalf("missing fields in output: %s", s)
+	}
+	if !(zebraIdx < alphaIdx && alphaIdx < middleIdx) {
+		t.Errorf("field order not preserved, expected zebra < alpha < middle, got: %s", s)
+	}
+}
+
+func TestRunJsonUpdate_PreservesNestedFieldOrder(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.json"
+	input := `{"zebra": {"beta": 1, "alpha": 2}, "alpha": 3}`
+	os.WriteFile(path, []byte(input), 0644)
+
+	err := runJsonUpdate([]string{"zebra.alpha", "99", path})
+	if err != nil {
+		t.Fatalf("runJsonUpdate: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	s := string(data)
+
+	// Root order: zebra before alpha
+	zebraIdx := strings.Index(s, `"zebra"`)
+	alphaRootIdx := strings.Index(s, `"alpha": 3`)
+	if zebraIdx == -1 || alphaRootIdx == -1 {
+		t.Fatalf("missing root fields in output: %s", s)
+	}
+	if !(zebraIdx < alphaRootIdx) {
+		t.Errorf("root field order not preserved, expected zebra < alpha, got: %s", s)
+	}
+
+	// Nested order: beta before alpha inside zebra
+	betaIdx := strings.Index(s, `"beta"`)
+	alphaNestedIdx := strings.Index(s, `"alpha": 99`)
+	if betaIdx == -1 || alphaNestedIdx == -1 {
+		t.Fatalf("missing nested fields in output: %s", s)
+	}
+	if !(betaIdx < alphaNestedIdx) {
+		t.Errorf("nested field order not preserved, expected beta < alpha, got: %s", s)
+	}
+}
+
+func TestRunJsonUpdateAdd_PreservesFieldOrder_AppendsNewKey(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.json"
+	os.WriteFile(path, []byte(`{"zebra": 1, "alpha": 2}`), 0644)
+
+	err := runJsonUpdateAdd([]string{"newkey", "3", path})
+	if err != nil {
+		t.Fatalf("runJsonUpdateAdd: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	s := string(data)
+
+	zebraIdx := strings.Index(s, `"zebra"`)
+	alphaIdx := strings.Index(s, `"alpha"`)
+	newIdx := strings.Index(s, `"newkey"`)
+
+	if zebraIdx == -1 || alphaIdx == -1 || newIdx == -1 {
+		t.Fatalf("missing fields in output: %s", s)
+	}
+	// Original order preserved, new key appended at end
+	if !(zebraIdx < alphaIdx && alphaIdx < newIdx) {
+		t.Errorf("field order not preserved, expected zebra < alpha < newkey, got: %s", s)
+	}
+}
+
 func TestRunJsonUpdate_RootIsArray(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/test.json"
