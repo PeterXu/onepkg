@@ -90,6 +90,31 @@ environment = { LOG_LEVEL = "debug" }  # environment variables (optional)
 limit_nofile = 10240          # file descriptor limit (optional)
                               # Sets both soft and hard resource limits
 
+# Optional: system overlays — map system paths to bundled items
+# At install time, if the system path exists on the target machine, the installer
+# copies from the system path into the install directory instead of using the
+# bundled version. If the system path does not exist, the bundled version is used.
+#
+# Use cases: preserve existing config files, certificates, or data directories
+# across upgrades; adopt host-specific files from a known system location.
+#
+# Rules:
+#   - "system" must be an absolute path on the target machine
+#   - "item" must match an entry in items (exact match or stripped {platform} form)
+#   - Works for both files and directories (directories are copied recursively)
+#   - Critical system paths (e.g., /etc/passwd, /root) are rejected
+#   - Path traversal (..) in system paths is rejected
+
+# Example: use existing agent config if present, otherwise install default
+# [[system_overlay]]
+# system = "/etc/agent/config.txt"
+# item = "etc/myapp.conf"
+
+# Example: preserve host certificates across reinstalls
+# [[system_overlay]]
+# system = "/etc/myapp/certs"
+# item = "data/certs"
+
 # Example: second service (post-MVP - not yet supported by installer)
 # [[services]]
 # name = "myapp-worker"

@@ -59,6 +59,7 @@ cd cmd/onepkg && go run . -c config.toml --platform linux-arm64,linux-amd64,darw
 - **Arch mapping**: Linux arm64 → `aarch64` (`uname -m`), macOS arm64 → `arm64`
 - **Platform resolution**: Items use `{platform}` marker (e.g., `bin/myapp.{platform}`) which resolves to platform-specific file (e.g., `bin/myapp.linux-arm64`) and packs with stripped path (`bin/myapp`). Missing platform files fail fast—no fallback.
 - **Required CLI flag**: `--platform` is required. Comma-separated for multi-platform builds (e.g., `--platform linux-arm64,linux-amd64`).
+- **System overlay**: `[[system_overlay]]` entries map absolute system paths to bundled items. At install time, if the system path exists on the target, it overwrites the bundled file. If missing, the bundled version is used. Design spec: `docs/superpowers/specs/2026-05-27-system-overlay-design.md`.
 
 ## Rules
 
