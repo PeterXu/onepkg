@@ -1225,3 +1225,141 @@ items = ["bin/myapp"]
 		t.Errorf("len(SystemOverlay) = %d, want 0 (no overlay defined)", len(cfg.SystemOverlay))
 	}
 }
+
+func TestValidateSystemOverlay(t *testing.T) {
+	dir := t.TempDir()
+	binDir := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	dataDir := filepath.Join(dir, "data")
+	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(binDir, "myapp"), []byte("#!/bin/sh"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, "test1.txt"), []byte("data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name    string
+		cfg     *Config
+		wantErr string
+	}{
+		{
+			name: "valid overlay matching item",
+			cfg: &Config{
+				Name:    "myapp",
+				Version: "v1.0.0",
+				Items:   []string{"bin/myapp", "data/test1.txt"},
+				SystemOverlay: []OverlayConfig{
+					{System: "/etc/agent/test1.txt", Item: "data/test1.txt"},
+				},
+			},
+			wantErr: "",
+		},
+		{
+			name: "overlay item not in items",
+			cfg: &Config{
+				Name:    "myapp",
+				Version: "v1.0.0",
+				Items:   []string{"bin/myapp"},
+				SystemOverlay: []OverlayConfig{
+					{System: "/etc/agent/test1.txt", Item: "data/missing.txt"},
+				},
+			},
+			wantErr: "overlay item \"data/missing.txt\" not found in items",
+		},
+		{
+			name: "overlay system not absolute",
+			cfg: &Config{
+				Name:    "myapp",
+				Version: "v1.0.0",
+				Items:   []string{"bin/myapp"},
+				SystemOverlay: []OverlayConfig{
+					{System: "etc/agent/test1.txt", Item: "bin/myapp"},
+				},
+			},
+			wantErr: "must be an absolute path",
+		},
+		{
+			name: "overlay system path traversal",
+			cfg: &Config{
+				Name:    "myapp",
+				Version: "v1.0.0",
+				Items:   []string{"bin/myapp"},
+				SystemOverlay: []OverlayConfig{
+					{System: "/etc/../etc/passwd", Item: "bin/myapp"},
+				},
+			},
+			wantErr: "path traversal",
+		},
+		{
+			name: "overlay system critical path",
+			cfg: &Config{
+				Name:    "myapp",
+				Version: "v1.0.0",
+				Items:   []string{"bin/myapp"},
+				SystemOverlay: []OverlayConfig{
+					{System: "/etc/passwd", Item: "bin/myapp"},
+				},
+			},
+			wantErr: "critical system path",
+		},
+		{
+			name: "overlay system empty",
+			cfg: &Config{
+				Name:    "myapp",
+				Version: "v1.0.0",
+				Items:   []string{"bin/myapp"},
+				SystemOverlay: []OverlayConfig{
+					{System: "", Item: "bin/myapp"},
+				},
+			},
+			wantErr: "must be an absolute path",
+		},
+		{
+			name: "overlay item empty",
+			cfg: &Config{
+				Name:    "myapp",
+				Version: "v1.0.0",
+				Items:   []string{"bin/myapp"},
+				SystemOverlay: []OverlayConfig{
+					{System: "/etc/agent/test1.txt", Item: ""},
+				},
+			},
+			wantErr: "overlay item is required",
+		},
+		{
+			name: "overlay item matches platform-marked item stripped form",
+			cfg: &Config{
+				Name:    "myapp",
+				Version: "v1.0.0",
+				Items:   []string{"bin/myapp.{platform}"},
+				SystemOverlay: []OverlayConfig{
+					{System: "/etc/config.txt", Item: "bin/myapp"},
+				},
+			},
+			wantErr: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.cfg.Validate(dir)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Errorf("Validate() returned unexpected error: %v", err)
+				}
+			} else {
+				if err == nil {
+					t.Errorf("Validate() returned nil, want error containing %q", tt.wantErr)
+				} else if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("Validate() error = %q, want error containing %q", err.Error(), tt.wantErr)
+				}
+			}
+		})
+	}
+}

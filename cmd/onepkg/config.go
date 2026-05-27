@@ -204,6 +204,37 @@ func (c *Config) Validate(configDir string) error {
 			return fmt.Errorf("invalid group %q for dirs path %q", d.Group, d.Path)
 		}
 	}
+	// System overlay validation
+	for _, overlay := range c.SystemOverlay {
+		if overlay.Item == "" {
+			return fmt.Errorf("overlay item is required")
+		}
+		if overlay.System == "" || !filepath.IsAbs(overlay.System) {
+			return fmt.Errorf("overlay system path %q must be an absolute path", overlay.System)
+		}
+		if strings.Contains(overlay.System, "..") {
+			return fmt.Errorf("path traversal not allowed in overlay system path %q", overlay.System)
+		}
+		cleanSys := filepath.Clean(overlay.System)
+		if isCriticalPath(cleanSys) {
+			return fmt.Errorf("critical system path not allowed in overlay: %q", overlay.System)
+		}
+		// Check overlay.Item matches an entry in items
+		matched := false
+		for _, item := range c.Items {
+			if overlay.Item == item {
+				matched = true
+				break
+			}
+			if HasPlatformMarker(item) && StripPlatformMarker(item) == overlay.Item {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return fmt.Errorf("overlay item %q not found in items", overlay.Item)
+		}
+	}
 	return nil
 }
 
