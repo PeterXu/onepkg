@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"strings"
 	"testing"
 )
 
@@ -208,5 +210,214 @@ func TestFormatJSONValue(t *testing.T) {
 				t.Errorf("formatJSONValue(%v) = %q, want %q", tt.input, result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestRunJsonUpdate_TopLevelString(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.json"
+	os.WriteFile(path, []byte(`{"name": "old", "version": "v1.0.0"}`), 0644)
+
+	err := runJsonUpdate([]string{"name", "new", path})
+	if err != nil {
+		t.Fatalf("runJsonUpdate: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	want := `"name": "new"`
+	if !strings.Contains(string(data), want) {
+		t.Errorf("file content = %q, want to contain %q", string(data), want)
+	}
+	if !strings.Contains(string(data), `"version": "v1.0.0"`) {
+		t.Errorf("version should be preserved, got: %q", string(data))
+	}
+}
+
+func TestRunJsonUpdate_NestedKey(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.json"
+	os.WriteFile(path, []byte(`{"services": {"web": {"port": 3000}}}`), 0644)
+
+	err := runJsonUpdate([]string{"services.web.port", "8080", path})
+	if err != nil {
+		t.Fatalf("runJsonUpdate: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	want := `"port": 8080`
+	if !strings.Contains(string(data), want) {
+		t.Errorf("file content = %q, want to contain %q", string(data), want)
+	}
+}
+
+func TestRunJsonUpdate_ArrayElement(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.json"
+	os.WriteFile(path, []byte(`{"dirs": [{"path": "/var/log"}, {"path": "/var/lib"}]}`), 0644)
+
+	err := runJsonUpdate([]string{"dirs.0.path", "/tmp/log", path})
+	if err != nil {
+		t.Fatalf("runJsonUpdate: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	want := `"path": "/tmp/log"`
+	if !strings.Contains(string(data), want) {
+		t.Errorf("file content = %q, want to contain %q", string(data), want)
+	}
+	if !strings.Contains(string(data), `"/var/lib"`) {
+		t.Errorf("dirs.1.path should be preserved, got: %q", string(data))
+	}
+}
+
+func TestRunJsonUpdate_BoolValue(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.json"
+	os.WriteFile(path, []byte(`{"enabled": false}`), 0644)
+
+	err := runJsonUpdate([]string{"enabled", "true", path})
+	if err != nil {
+		t.Fatalf("runJsonUpdate: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	want := `"enabled": true`
+	if !strings.Contains(string(data), want) {
+		t.Errorf("file content = %q, want to contain %q", string(data), want)
+	}
+}
+
+func TestRunJsonUpdate_IntValue(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.json"
+	os.WriteFile(path, []byte(`{"count": 5}`), 0644)
+
+	err := runJsonUpdate([]string{"count", "10", path})
+	if err != nil {
+		t.Fatalf("runJsonUpdate: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	want := `"count": 10`
+	if !strings.Contains(string(data), want) {
+		t.Errorf("file content = %q, want to contain %q", string(data), want)
+	}
+}
+
+func TestRunJsonUpdate_FloatValue(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.json"
+	os.WriteFile(path, []byte(`{"rate": 1.0}`), 0644)
+
+	err := runJsonUpdate([]string{"rate", "3.14", path})
+	if err != nil {
+		t.Fatalf("runJsonUpdate: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	want := `"rate": 3.14`
+	if !strings.Contains(string(data), want) {
+		t.Errorf("file content = %q, want to contain %q", string(data), want)
+	}
+}
+
+func TestRunJsonUpdate_NullValue(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.json"
+	os.WriteFile(path, []byte(`{"deprecated": "yes"}`), 0644)
+
+	err := runJsonUpdate([]string{"deprecated", "null", path})
+	if err != nil {
+		t.Fatalf("runJsonUpdate: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	want := `"deprecated": null`
+	if !strings.Contains(string(data), want) {
+		t.Errorf("file content = %q, want to contain %q", string(data), want)
+	}
+}
+
+func TestRunJsonUpdate_StringTypePreserved(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.json"
+	os.WriteFile(path, []byte(`{"name": "true"}`), 0644)
+
+	err := runJsonUpdate([]string{"name", "false", path})
+	if err != nil {
+		t.Fatalf("runJsonUpdate: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	want := `"name": "false"`
+	if !strings.Contains(string(data), want) {
+		t.Errorf("file content = %q, want to contain %q (string, not bool)", string(data), want)
+	}
+}
+
+func TestRunJsonUpdate_KeyNotExist(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.json"
+	os.WriteFile(path, []byte(`{"name": "old"}`), 0644)
+
+	err := runJsonUpdate([]string{"missing", "val", path})
+	if err == nil {
+		t.Error("expected error for nonexistent key")
+	}
+	if !strings.Contains(err.Error(), "does not exist") {
+		t.Errorf("error = %q, want 'does not exist'", err.Error())
+	}
+}
+
+func TestRunJsonUpdate_FileNotExist(t *testing.T) {
+	err := runJsonUpdate([]string{"name", "val", "/nonexistent.json"})
+	if err == nil {
+		t.Error("expected error for nonexistent file")
+	}
+}
+
+func TestRunJsonUpdate_TooFewArgs(t *testing.T) {
+	err := runJsonUpdate([]string{"name", "val"})
+	if err == nil {
+		t.Error("expected error for too few args")
+	}
+}
+
+func TestRunJsonUpdate_SameValue(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.json"
+	os.WriteFile(path, []byte(`{"name": "old"}`), 0644)
+
+	original, _ := os.ReadFile(path)
+	err := runJsonUpdate([]string{"name", "old", path})
+	if err != nil {
+		t.Fatalf("runJsonUpdate: %v", err)
+	}
+
+	after, _ := os.ReadFile(path)
+	if string(original) != string(after) {
+		t.Errorf("file should not change when value is the same\nbefore: %q\nafter: %q", string(original), string(after))
+	}
+}
+
+func TestRunJsonUpdate_ArrayIndexOutOfRange(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.json"
+	os.WriteFile(path, []byte(`{"items": ["one"]}`), 0644)
+
+	err := runJsonUpdate([]string{"items.5", "x", path})
+	if err == nil {
+		t.Error("expected error for out-of-range index")
+	}
+}
+
+func TestRunJsonUpdate_InvalidJSON(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.json"
+	os.WriteFile(path, []byte(`{invalid`), 0644)
+
+	err := runJsonUpdate([]string{"name", "val", path})
+	if err == nil {
+		t.Error("expected error for invalid JSON")
 	}
 }

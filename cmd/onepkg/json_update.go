@@ -3,7 +3,9 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 )
@@ -112,4 +114,100 @@ func formatJSONValue(v interface{}) string {
 	default:
 		return fmt.Sprintf("%v", val)
 	}
+}
+
+// runJsonUpdate executes the json-update subcommand (update-only).
+func runJsonUpdate(args []string) error {
+	return jsonUpdateCore(args, false)
+}
+
+// runJsonUpdateAdd executes the json-update subcommand with --add (upsert).
+func runJsonUpdateAdd(args []string) error {
+	return jsonUpdateCore(args, true)
+}
+
+func jsonUpdateCore(args []string, allowAdd bool) error {
+	if len(args) < 3 {
+		return fmt.Errorf("usage: onepkg json-update [--add] <key> <value> <file>")
+	}
+
+	key := args[0]
+	filePath := args[2]
+
+	raw, err := os.ReadFile(filePath)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", filePath, err)
+	}
+
+	var data interface{}
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return fmt.Errorf("parse %s: %w", filePath, err)
+	}
+
+	root, ok := data.(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("root is not a JSON object")
+	}
+
+	parent, leaf, found := navigateJSON(root, key)
+
+	if !found && !allowAdd {
+		return fmt.Errorf("key %q does not exist (use --add to insert)", key)
+	}
+
+	newVal := ParseValue(args[1])
+
+	if found {
+		// Get old value for type preservation and no-op check
+		var oldVal interface{}
+		switch v := parent.(type) {
+		case map[string]interface{}:
+			oldVal = v[leaf]
+		case []interface{}:
+			idx, _ := strconv.Atoi(leaf)
+			oldVal = v[idx]
+		}
+
+		// Type preservation: if old value is a string, treat new value as string
+		// Exception: explicit null is never coerced to a string
+		if newVal != nil {
+			if _, isStr := oldVal.(string); isStr {
+				newVal = args[1]
+			}
+		}
+
+		// No-op check
+		oldStr := formatJSONValue(oldVal)
+		newStr := formatJSONValue(newVal)
+		if oldStr == newStr {
+			return nil
+		}
+
+		// Set new value
+		switch v := parent.(type) {
+		case map[string]interface{}:
+			v[leaf] = newVal
+		case []interface{}:
+			idx, _ := strconv.Atoi(leaf)
+			v[idx] = newVal
+		}
+	} else {
+		// --add mode: key not found, insert new
+		// Only support adding to map (not array append)
+		m, ok := parent.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("cannot add key %q to non-object parent", key)
+		}
+		m[leaf] = newVal
+	}
+
+	// Re-serialize with original indentation
+	indent := detectIndentation(raw)
+	result, err := json.MarshalIndent(root, "", indent)
+	if err != nil {
+		return fmt.Errorf("marshal: %w", err)
+	}
+	result = append(result, '\n')
+
+	return os.WriteFile(filePath, result, 0644)
 }
