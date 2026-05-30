@@ -161,6 +161,26 @@ func main() {
 	fmt.Printf("\nBuilt %d platform(s)\n", len(platforms))
 }
 
+// unameArch maps GOARCH to the value uname -m returns on the target system.
+func unameArch(goos, arch string) string {
+	switch {
+	case goos == "linux" && arch == "arm64":
+		return "aarch64"
+	case arch == "amd64":
+		return "x86_64"
+	case arch == "386":
+		return "i686"
+	case arch == "loong64":
+		return "loongarch64"
+	case arch == "mipsle":
+		return "mipsel"
+	case arch == "mips64le":
+		return "mips64el"
+	default:
+		return arch
+	}
+}
+
 func BuildForPlatform(cfg *Config, platform string, entries []FileEntry, tarData []byte, shaMap map[string]string, outputDir string) error {
 	parts := strings.SplitN(platform, "-", 2)
 	if len(parts) != 2 {
@@ -245,10 +265,7 @@ func BuildForPlatform(cfg *Config, platform string, entries []FileEntry, tarData
 		serviceType = "none"
 	}
 
-	expectedArch := arch
-	if goos == "linux" && arch == "arm64" {
-		expectedArch = "aarch64"
-	}
+	expectedArch := unameArch(goos, arch)
 
 	// Convert DirConfig to DirSpec
 	var dirs []installer.DirSpec

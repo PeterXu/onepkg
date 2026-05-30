@@ -7,6 +7,35 @@ import (
 	"testing"
 )
 
+func TestUnameArch(t *testing.T) {
+	tests := []struct {
+		goos, arch, want string
+	}{
+		{"linux", "amd64", "x86_64"},
+		{"linux", "arm64", "aarch64"},
+		{"linux", "386", "i686"},
+		{"linux", "loong64", "loongarch64"},
+		{"linux", "mipsle", "mipsel"},
+		{"linux", "mips64le", "mips64el"},
+		{"darwin", "amd64", "x86_64"},
+		{"darwin", "arm64", "arm64"},
+		{"linux", "riscv64", "riscv64"},
+		{"linux", "s390x", "s390x"},
+		{"linux", "ppc64le", "ppc64le"},
+		{"linux", "mips64", "mips64"},
+		{"linux", "arm", "arm"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.goos+"/"+tt.arch, func(t *testing.T) {
+			got := unameArch(tt.goos, tt.arch)
+			if got != tt.want {
+				t.Errorf("unameArch(%q, %q) = %q, want %q", tt.goos, tt.arch, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestBuildPackage(t *testing.T) {
 	projectDir := t.TempDir()
 
