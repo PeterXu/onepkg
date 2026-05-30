@@ -105,7 +105,7 @@ install_service() {
     elif [ "$SERVICE_TYPE" = "launchd" ]; then
         echo "$SERVICE_B64" | base64 -d > "/Library/LaunchDaemons/$SERVICE_NAME"
         # Update paths from DEFAULT_DIR to actual install location
-        sed -i "s|$DEFAULT_DIR|$install_dir|g" "/Library/LaunchDaemons/$SERVICE_NAME"
+        sed -i '' "s|$DEFAULT_DIR|$install_dir|g" "/Library/LaunchDaemons/$SERVICE_NAME"
         launchctl load "/Library/LaunchDaemons/$SERVICE_NAME"
     fi
 }
@@ -143,7 +143,11 @@ create_dirs() {
         mkdir -p "$dir_path"
 
         if [ -n "$dir_owner" ]; then
-            chown "${dir_owner}:${dir_group:-$dir_owner}" "$dir_path"
+            local _group="${dir_group:-$dir_owner}"
+            if [ "$(uname -s)" = "Darwin" ] && [ "$_group" = "root" ]; then
+                _group="wheel"
+            fi
+            chown "${dir_owner}:${_group}" "$dir_path"
         fi
 
         if [ -n "$dir_mode" ]; then
