@@ -356,8 +356,11 @@ func BuildForWindows(cfg *Config, platform string, entries []FileEntry, shaMap m
 		serviceConfig = installer.WindowsServiceConfig{
 			StartType:       svc.Windows.StartType,
 			RecoveryDelayMs: *svc.Windows.RecoveryDelayMs,
-			Exec:            filepath.Join(defaultDir, svc.Exec),
-			Args:            svc.Args,
+			// Exec is kept relative; install.ps1 resolves it against $InstallDir at
+			// install time so a custom -InstallDir is reflected in the service binPath
+			// (matching how the .sh installer rewrites DEFAULT_DIR -> install_dir).
+			Exec: svc.Exec,
+			Args: svc.Args,
 		}
 	}
 

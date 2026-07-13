@@ -9,7 +9,7 @@ import (
 type WindowsServiceConfig struct {
 	StartType       string   // auto | manual | disabled
 	RecoveryDelayMs int      // delay before restart on failure (ms)
-	Exec            string   // full path to executable
+	Exec            string   // path to executable, relative to install dir (resolved via Join-Path $InstallDir at install time)
 	Args            []string // command-line arguments
 }
 
@@ -52,6 +52,21 @@ func GeneratePowerShellInstaller(cfg PowerShellConfig) (string, error) {
 	fmt.Fprintf(&b, "$PKG_VERSION = %s\n", psQuote(cfg.Version))
 	fmt.Fprintf(&b, "$PKG_PLATFORM = %s\n", psQuote(cfg.Platform))
 	fmt.Fprintf(&b, "$EXPECTED_ARCH = %s\n", psQuote(cfg.ExpectedArch))
+	// An amd64 package also runs on arm64 Windows via x64 emulation; an arm64
+	// package only runs on arm64 (x64 cannot emulate arm64). CheckArch accepts
+	// any arch in this list rather than requiring an exact match.
+	allowedArches := []string{cfg.ExpectedArch}
+	if cfg.ExpectedArch == "AMD64" {
+		allowedArches = append(allowedArches, "ARM64")
+	}
+	b.WriteString("$ALLOWED_ARCHS = @(")
+	for i, a := range allowedArches {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString(psQuote(a))
+	}
+	b.WriteString(")\n")
 	fmt.Fprintf(&b, "$DEFAULT_DIR = %s\n", psQuote(cfg.DefaultDir))
 	fmt.Fprintf(&b, "$SERVICE_NAME = %s\n", psQuote(cfg.ServiceName))
 
@@ -112,8 +127,8 @@ func powershellFunctions(cfg PowerShellConfig) string {
 
 function CheckArch {
     $arch = $env:PROCESSOR_ARCHITECTURE
-    if ($arch -ne $EXPECTED_ARCH) {
-        Write-Error "Error: This package is for $EXPECTED_ARCH, current system is $arch"
+    if ($ALLOWED_ARCHS -notcontains $arch) {
+        Write-Error "Error: This package is for $EXPECTED_ARCH (supported: $($ALLOWED_ARCHS -join ', ')), current system is $arch"
         exit 1
     }
 }
@@ -122,19 +137,44 @@ function CheckArch {
 
 	if hasService {
 		b.WriteString(`function InstallService {
-    $binPath = "` + "`" + `"$SERVICE_EXEC` + "`" + `""
+    $exePath = Join-Path $InstallDir $SERVICE_EXEC
+    $binPath = "` + "`" + `"$exePath` + "`" + `"
     if ($SERVICE_ARGS.Count -gt 0) {
-        $binPath += " " + ($SERVICE_ARGS -join " ")
+        $binPath += " " + (($SERVICE_ARGS | ForEach-Object {
+            $a = $_ -replace '"', '\"'
+            if ($_ -match '[\s"]') { '"' + $a + '"' } else { $a }
+        }) -join ' ')
     }
-    $scStartType = $SERVICE_START_TYPE
-    if ($scStartType -eq 'manual') { $scStartType = 'demand' }
+    $startupType = switch ($SERVICE_START_TYPE) {
+        'auto'     { 'Automatic' }
+        'manual'   { 'Manual' }
+        'disabled' { 'Disabled' }
+        default    { 'Automatic' }
+    }
+
+    # New-Service throws if the service already exists, so reinstall would fail.
+    # Remove a prior instance first to make install idempotent. This assumes the
+    # existing service is a previous install of THIS package; a same-named but
+    # unrelated service would also be replaced.
+    if (Get-Service -Name $SERVICE_NAME -ErrorAction SilentlyContinue) {
+        Write-Host "Replacing existing service $SERVICE_NAME..."
+        sc.exe stop $SERVICE_NAME 2>$null
+        sc.exe delete $SERVICE_NAME | Out-Null
+        # sc.exe delete is asynchronous (marks SERVICE_MARKED_FOR_DELETE); wait
+        # for the SCM to actually release the name before recreating, with a
+        # bounded timeout so we don't hang forever.
+        $deadline = (Get-Date).AddSeconds(10)
+        while ((Get-Service -Name $SERVICE_NAME -ErrorAction SilentlyContinue) -and ((Get-Date) -lt $deadline)) {
+            Start-Sleep -Milliseconds 250
+        }
+    }
 
     Write-Host "Creating service $SERVICE_NAME..."
-    sc.exe create $SERVICE_NAME binPath= $binPath start= $scStartType
+    New-Service -Name $SERVICE_NAME -BinaryPathName $binPath -StartupType $startupType | Out-Null
 
     if ($SERVICE_RECOVERY_DELAY_MS -gt 0) {
         Write-Host "Configuring service recovery..."
-        sc.exe failure $SERVICE_NAME actions= restart/$SERVICE_RECOVERY_DELAY_MS reset= 0
+        sc.exe failure $SERVICE_NAME actions= restart/$SERVICE_RECOVERY_DELAY_MS/restart/$SERVICE_RECOVERY_DELAY_MS/restart/$SERVICE_RECOVERY_DELAY_MS reset= 86400
         sc.exe failureflag $SERVICE_NAME 1
     }
 
