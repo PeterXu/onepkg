@@ -140,10 +140,14 @@ func main() {
 			os.Exit(1)
 		}
 
-		tarData, err := BuildTarGZ(entries, *cfg.PreservePermissions)
-		if err != nil {
-			fmt.Printf("Error building archive for %s: %v\n", platform, err)
-			os.Exit(1)
+		goos := strings.SplitN(platform, "-", 2)[0]
+		var tarData []byte
+		if goos != "windows" {
+			tarData, err = BuildTarGZ(entries, *cfg.PreservePermissions)
+			if err != nil {
+				fmt.Printf("Error building archive for %s: %v\n", platform, err)
+				os.Exit(1)
+			}
 		}
 
 		shaMap := make(map[string]string)
@@ -164,6 +168,10 @@ func main() {
 // unameArch maps GOARCH to the value uname -m returns on the target system.
 func unameArch(goos, arch string) string {
 	switch {
+	case goos == "windows" && arch == "amd64":
+		return "AMD64"
+	case goos == "windows" && arch == "arm64":
+		return "ARM64"
 	case goos == "linux" && arch == "arm64":
 		return "aarch64"
 	case arch == "amd64":
@@ -257,6 +265,8 @@ func BuildForPlatform(cfg *Config, platform string, entries []FileEntry, tarData
 				LimitNOFILE: svc.MacOS.LimitNOFILE,
 			})
 		}
+	case "windows":
+		return BuildForWindows(cfg, platform, entries, shaMap, outputDir)
 	default:
 		defaultDir = "/usr/local/" + cfg.Name
 	}
@@ -311,9 +321,106 @@ func BuildForPlatform(cfg *Config, platform string, entries []FileEntry, tarData
 	return os.WriteFile(outputPath, []byte(script), 0755)
 }
 
+func BuildForWindows(cfg *Config, platform string, entries []FileEntry, shaMap map[string]string, outputDir string) error {
+	parts := strings.SplitN(platform, "-", 2)
+	arch := parts[1]
+
+	defaultDir := filepath.Join("C:", "Program Files", cfg.Name)
+
+	versionContent, err := GenerateVersion(VersionInfo{
+		Name:     cfg.Name,
+		Version:  cfg.Version,
+		Platform: platform,
+		Created:  time.Now().UTC(),
+		Files:    len(entries),
+		SHA:      shaMap,
+	})
+	if err != nil {
+		return fmt.Errorf("generate version: %w", err)
+	}
+
+	// Build ZIP payload with VERSION file included
+	payloadZip, err := BuildZipWithExtras(entries, *cfg.PreservePermissions, []VirtualFile{
+		{RelPath: "VERSION", Content: []byte(versionContent), Mode: 0644},
+	})
+	if err != nil {
+		return fmt.Errorf("build zip: %w", err)
+	}
+
+	// Build Windows service config (if service defined)
+	var serviceName string
+	var serviceConfig installer.WindowsServiceConfig
+	if len(cfg.Services) > 0 {
+		svc := cfg.Services[0]
+		serviceName = svc.Name
+		serviceConfig = installer.WindowsServiceConfig{
+			StartType:       svc.Windows.StartType,
+			RecoveryDelayMs: *svc.Windows.RecoveryDelayMs,
+			Exec:            filepath.Join(defaultDir, svc.Exec),
+			Args:            svc.Args,
+		}
+	}
+
+	// Convert DirConfig to DirSpec
+	var dirs []installer.DirSpec
+	for _, d := range cfg.Dirs {
+		dirs = append(dirs, installer.DirSpec{
+			Path:  d.Path,
+			Owner: d.Owner,
+			Group: d.Group,
+			Mode:  d.Mode,
+		})
+	}
+
+	// Convert OverlayConfig to OverlaySpec
+	var overlays []installer.OverlaySpec
+	for _, o := range cfg.SystemOverlay {
+		overlays = append(overlays, installer.OverlaySpec{
+			System: o.System,
+			Item:   o.Item,
+		})
+	}
+
+	// Generate install.ps1
+	ps1Content, err := installer.GeneratePowerShellInstaller(installer.PowerShellConfig{
+		Name:          cfg.Name,
+		Version:       cfg.Version,
+		Platform:      platform,
+		ExpectedArch:  unameArch("windows", arch),
+		DefaultDir:    defaultDir,
+		ServiceName:   serviceName,
+		ServiceConfig: serviceConfig,
+		Dirs:          dirs,
+		Overlays:      overlays,
+	})
+	if err != nil {
+		return fmt.Errorf("generate powershell: %w", err)
+	}
+
+	// Generate self-extracting exe
+	exeData, err := installer.GenerateExeWrapper(installer.ExeWrapperConfig{
+		Name:          cfg.Name,
+		Version:       cfg.Version,
+		Platform:      platform,
+		InstallScript: ps1Content,
+		PayloadZip:    payloadZip,
+	})
+	if err != nil {
+		return fmt.Errorf("generate exe wrapper: %w", err)
+	}
+
+	outputPath := platformOutputPath(cfg, platform, outputDir)
+	return os.WriteFile(outputPath, exeData, 0755)
+}
+
 func platformOutputPath(cfg *Config, platform string, outputDir string) string {
 	platformFile := strings.ReplaceAll(platform, "-", "_")
-	return filepath.Join(outputDir, fmt.Sprintf("%s_%s_%s.sh", cfg.Name, cfg.Version, platformFile))
+	goos := strings.SplitN(platform, "-", 2)[0]
+	ext := ".sh"
+	if goos == "windows" {
+		ext = ".exe"
+	}
+	return filepath.Join(outputDir, fmt.Sprintf("%s_%s_%s%s", cfg.Name, cfg.Version, platformFile, ext))
 }
 
 func printHelp() {

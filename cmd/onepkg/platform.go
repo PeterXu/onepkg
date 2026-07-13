@@ -6,9 +6,9 @@ import (
 )
 
 var validOS = map[string]bool{
-	"linux":  true,
-	"darwin": true,
-	// "windows": true, // Post-MVP
+	"linux":   true,
+	"darwin":  true,
+	"windows": true,
 }
 
 var validArch = map[string]bool{
@@ -31,7 +31,7 @@ func ValidatePlatform(platform string) error {
 	os, arch := parts[0], parts[1]
 
 	if !validOS[os] {
-		return fmt.Errorf("invalid os %q in platform %q (supported: linux, darwin)", os, platform)
+		return fmt.Errorf("invalid os %q in platform %q (supported: linux, darwin, windows)", os, platform)
 	}
 
 	if !validArch[arch] {

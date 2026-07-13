@@ -101,7 +101,7 @@ dist/myapp_v1.2.0_darwin_arm64.sh
 
 ## Scope
 
-**MVP:** Linux and macOS only. Windows support (`.ps1`, Windows Service) is post-MVP.
+**Platforms:** Linux (systemd), macOS (launchd), and Windows (Windows Service). Windows installers are self-extracting `.exe` files.
 
 ## License
 

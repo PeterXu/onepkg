@@ -10,8 +10,21 @@ VERSION ?= $(DATE_PREFIX).$(GIT_VERSION)
 LDFLAGS += -X main.Version=$(VERSION)
 
 
-build:
+build: win-wrapper
 	cd cmd/onepkg && env CGO_ENABLED=0 GOOS=$(OS) GOARCH=$(ARCH) go build -ldflags "$(LDFLAGS)" -o onepkg .
+	@echo
+
+win-wrapper:
+	@echo
+	cd cmd/onepkg/installer/stub-src && GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-H windowsgui" -o ../stubs/wrapper-stub-amd64.exe .
+	@echo
+	cd cmd/onepkg/installer/stub-src && GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-H windowsgui" -o ../stubs/wrapper-stub-arm64.exe .
+	@echo
+
+test: win-wrapper
+	cd cmd/onepkg && go test ./...
+	@echo
+	cd cmd/onepkg/installer/stub-src && go test
 	@echo
 
 install: build

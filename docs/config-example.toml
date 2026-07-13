@@ -90,6 +90,15 @@ environment = { LOG_LEVEL = "debug" }  # environment variables (optional)
 limit_nofile = 10240          # file descriptor limit (optional)
                               # Sets both soft and hard resource limits
 
+# Windows-specific (Windows Service) settings
+[services.windows]
+start_type = "auto"            # start type: auto (default) | manual | disabled
+                              # - auto: service starts at boot
+                              # - manual: service starts manually or on demand
+                              # - disabled: service cannot start
+recovery_delay_ms = 5000       # delay before restart on failure in ms (default: 5000)
+                              # Sets service recovery to restart after this delay
+
 # Optional: system overlays — map system paths to bundled items
 # At install time, if the system path exists on the target machine, the installer
 # copies from the system path into the install directory instead of using the

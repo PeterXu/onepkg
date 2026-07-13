@@ -2,6 +2,7 @@ package main
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"crypto/sha1"
@@ -339,4 +340,70 @@ func normalizedMode(mode fs.FileMode) fs.FileMode {
 		return 0755
 	}
 	return 0644
+}
+
+// VirtualFile is an in-memory file to add to an archive (e.g., generated VERSION file)
+type VirtualFile struct {
+	RelPath string
+	Content []byte
+	Mode    fs.FileMode
+}
+
+// BuildZip creates a ZIP archive from file entries (for Windows installers)
+func BuildZip(entries []FileEntry, preservePermissions bool) ([]byte, error) {
+	return BuildZipWithExtras(entries, preservePermissions, nil)
+}
+
+// BuildZipWithExtras creates a ZIP archive from file entries plus in-memory virtual files
+func BuildZipWithExtras(entries []FileEntry, preservePermissions bool, extras []VirtualFile) ([]byte, error) {
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+
+	for _, entry := range entries {
+		data, err := os.ReadFile(entry.AbsPath)
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", entry.RelPath, err)
+		}
+
+		mode := entry.Mode
+		if !preservePermissions {
+			mode = normalizedMode(entry.Mode)
+		}
+
+		hdr := &zip.FileHeader{
+			Name:   entry.RelPath,
+			Method: zip.Deflate,
+		}
+		hdr.SetMode(mode)
+
+		w, err := zw.CreateHeader(hdr)
+		if err != nil {
+			return nil, fmt.Errorf("zip header %s: %w", entry.RelPath, err)
+		}
+		if _, err := w.Write(data); err != nil {
+			return nil, fmt.Errorf("zip write %s: %w", entry.RelPath, err)
+		}
+	}
+
+	for _, extra := range extras {
+		hdr := &zip.FileHeader{
+			Name:   extra.RelPath,
+			Method: zip.Deflate,
+		}
+		hdr.SetMode(extra.Mode)
+
+		w, err := zw.CreateHeader(hdr)
+		if err != nil {
+			return nil, fmt.Errorf("zip header %s: %w", extra.RelPath, err)
+		}
+		if _, err := w.Write(extra.Content); err != nil {
+			return nil, fmt.Errorf("zip write %s: %w", extra.RelPath, err)
+		}
+	}
+
+	if err := zw.Close(); err != nil {
+		return nil, fmt.Errorf("close zip: %w", err)
+	}
+
+	return buf.Bytes(), nil
 }

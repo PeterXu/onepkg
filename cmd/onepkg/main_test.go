@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,8 @@ func TestUnameArch(t *testing.T) {
 	}{
 		{"linux", "amd64", "x86_64"},
 		{"linux", "arm64", "aarch64"},
+		{"windows", "amd64", "AMD64"},
+		{"windows", "arm64", "ARM64"},
 		{"linux", "386", "i686"},
 		{"linux", "loong64", "loongarch64"},
 		{"linux", "mipsle", "mipsel"},
@@ -361,5 +364,102 @@ item = "bin/myapp"
 	}
 	if !strings.Contains(script, `OVERLAY_0_ITEM="bin/myapp"`) {
 		t.Error("installer should have correct OVERLAY_0_ITEM")
+	}
+}
+
+func TestBuildForWindows(t *testing.T) {
+	projectDir := t.TempDir()
+
+	binDir := filepath.Join(projectDir, "bin")
+	os.MkdirAll(binDir, 0755)
+	os.WriteFile(filepath.Join(binDir, "myapp.exe"), []byte("fake-exe-content"), 0755)
+
+	configContent := `
+name = "myapp"
+version = "v1.0.0"
+
+items = ["bin/myapp.exe"]
+
+[[services]]
+name = "myapp"
+exec = "bin/myapp.exe"
+
+[services.windows]
+start_type = "auto"
+recovery_delay_ms = 5000
+`
+	configPath := filepath.Join(projectDir, "config.toml")
+	os.WriteFile(configPath, []byte(configContent), 0644)
+
+	cfg, err := ParseConfig(configPath)
+	if err != nil {
+		t.Fatalf("ParseConfig: %v", err)
+	}
+	cfg.ApplyDefaults()
+
+	platform := "windows-amd64"
+	resolved, err := ResolveItems(projectDir, cfg.Items, platform)
+	if err != nil {
+		t.Fatalf("ResolveItems: %v", err)
+	}
+
+	entries, err := CollectFilesResolved(projectDir, resolved, cfg.Exclude)
+	if err != nil {
+		t.Fatalf("CollectFilesResolved: %v", err)
+	}
+
+	shaMap := make(map[string]string)
+	for _, e := range entries {
+		shaMap[e.RelPath] = e.SHA1
+	}
+
+	outputDir := filepath.Join(projectDir, "packages")
+	os.MkdirAll(outputDir, 0755)
+
+	// For Windows, tarData is nil (built internally)
+	if err := BuildForPlatform(cfg, platform, entries, nil, shaMap, outputDir); err != nil {
+		t.Fatalf("BuildForPlatform: %v", err)
+	}
+
+	// Verify output file exists with .exe extension
+	expectedFile := filepath.Join(outputDir, "myapp_v1.0.0_windows_amd64.exe")
+	if _, err := os.Stat(expectedFile); os.IsNotExist(err) {
+		t.Fatalf("expected output file %s does not exist", expectedFile)
+	}
+
+	// Verify exe ends with magic marker
+	data, err := os.ReadFile(expectedFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasSuffix(data, []byte("ONEPKG")) {
+		t.Error("exe does not end with ONEPKG magic marker")
+	}
+	// Verify exe starts with MZ (PE header)
+	if data[0] != 'M' || data[1] != 'Z' {
+		t.Error("exe does not start with MZ (Windows PE header)")
+	}
+}
+
+func TestPlatformOutputPathWindows(t *testing.T) {
+	cfg := &Config{Name: "myapp", Version: "v1.0.0"}
+
+	tests := []struct {
+		platform string
+		want     string
+	}{
+		{"linux-amd64", "myapp_v1.0.0_linux_amd64.sh"},
+		{"darwin-arm64", "myapp_v1.0.0_darwin_arm64.sh"},
+		{"windows-amd64", "myapp_v1.0.0_windows_amd64.exe"},
+		{"windows-arm64", "myapp_v1.0.0_windows_arm64.exe"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.platform, func(t *testing.T) {
+			got := filepath.Base(platformOutputPath(cfg, tt.platform, ""))
+			if got != tt.want {
+				t.Errorf("platformOutputPath(%q) = %q, want %q", tt.platform, got, tt.want)
+			}
+		})
 	}
 }

@@ -23,13 +23,19 @@ type Config struct {
 }
 
 type ServiceConfig struct {
-	Name    string       `toml:"name"`
-	Exec    string       `toml:"exec"`
-	Args    []string     `toml:"args"`
-	Restart string       `toml:"restart"`
-	User    string       `toml:"user"`
-	Linux   LinuxService `toml:"linux"`
-	MacOS   MacOSService `toml:"macos"`
+	Name    string        `toml:"name"`
+	Exec    string        `toml:"exec"`
+	Args    []string      `toml:"args"`
+	Restart string        `toml:"restart"`
+	User    string        `toml:"user"`
+	Linux   LinuxService  `toml:"linux"`
+	MacOS   MacOSService  `toml:"macos"`
+	Windows WindowsService `toml:"windows"`
+}
+
+type WindowsService struct {
+	StartType       string `toml:"start_type"`        // auto | manual | disabled
+	RecoveryDelayMs *int   `toml:"recovery_delay_ms"` // delay before restart on failure (ms); nil = default 5000, 0 = no recovery
 }
 
 type LinuxService struct {
@@ -99,6 +105,14 @@ func (c *Config) ApplyDefaults() {
 					break
 				}
 			}
+		}
+		// Windows service defaults
+		if c.Services[i].Windows.StartType == "" {
+			c.Services[i].Windows.StartType = "auto"
+		}
+		if c.Services[i].Windows.RecoveryDelayMs == nil {
+			defaultDelay := 5000
+			c.Services[i].Windows.RecoveryDelayMs = &defaultDelay
 		}
 	}
 	// Dirs defaults
@@ -176,6 +190,18 @@ func (c *Config) Validate(configDir string) error {
 			if !matched {
 				return fmt.Errorf("service exec %q not found in items", svc.Exec)
 			}
+		}
+		// Windows service validation
+		if svc.Windows.StartType != "" {
+			switch svc.Windows.StartType {
+			case "auto", "manual", "disabled":
+				// valid
+			default:
+				return fmt.Errorf("service windows start_type %q must be one of: auto, manual, disabled", svc.Windows.StartType)
+			}
+		}
+		if svc.Windows.RecoveryDelayMs != nil && *svc.Windows.RecoveryDelayMs < 0 {
+			return fmt.Errorf("service windows recovery_delay_ms must be >= 0")
 		}
 	}
 	// Dirs validation

@@ -16,7 +16,9 @@ func TestValidatePlatform(t *testing.T) {
 		{"darwin-arm64", ""},
 		{"darwin-amd64", ""},
 		{"darwin-x86_64", "invalid arch"},
-		{"windows-amd64", "invalid os"}, // MVP only supports linux/darwin
+		{"windows-amd64", ""},            // Windows now supported
+		{"windows-arm64", ""},            // Windows now supported
+		{"windows-x86", "invalid arch"},  // x86 not supported
 		{"linux", "invalid platform format"},
 		{"arm64", "invalid platform format"},
 		{"", "invalid platform format"},

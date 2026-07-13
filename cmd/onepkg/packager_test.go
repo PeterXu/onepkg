@@ -2,6 +2,7 @@ package main
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"io"
@@ -639,5 +640,89 @@ func TestCollectFilesExcludeEmpty(t *testing.T) {
 	}
 	if entries[0].RelPath != "bin/app" {
 		t.Errorf("entries[0].RelPath = %q, want %q", entries[0].RelPath, "bin/app")
+	}
+}
+
+func TestBuildZip(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "bin"), 0755)
+	os.MkdirAll(filepath.Join(dir, "etc"), 0755)
+	os.WriteFile(filepath.Join(dir, "bin", "app.exe"), []byte("hello"), 0755)
+	os.WriteFile(filepath.Join(dir, "etc", "app.conf"), []byte("key=val"), 0644)
+
+	entries, err := CollectFiles(dir, []string{"bin/app.exe", "etc/app.conf"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	zipData, err := BuildZip(entries, true)
+	if err != nil {
+		t.Fatalf("BuildZip returned error: %v", err)
+	}
+
+	zr, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
+	if err != nil {
+		t.Fatalf("zip.NewReader error: %v", err)
+	}
+
+	found := map[string]bool{}
+	for _, f := range zr.File {
+		found[f.Name] = true
+	}
+	if !found["bin/app.exe"] {
+		t.Error("zip missing bin/app.exe")
+	}
+	if !found["etc/app.conf"] {
+		t.Error("zip missing etc/app.conf")
+	}
+}
+
+func TestBuildZipWithExtras(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "bin"), 0755)
+	os.WriteFile(filepath.Join(dir, "bin", "app.exe"), []byte("hello"), 0755)
+
+	entries, err := CollectFiles(dir, []string{"bin/app.exe"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	versionContent := "name = \"myapp\"\nversion = \"v1.0.0\"\n"
+	zipData, err := BuildZipWithExtras(entries, true, []VirtualFile{
+		{RelPath: "VERSION", Content: []byte(versionContent), Mode: 0644},
+	})
+	if err != nil {
+		t.Fatalf("BuildZipWithExtras returned error: %v", err)
+	}
+
+	zr, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
+	if err != nil {
+		t.Fatalf("zip.NewReader error: %v", err)
+	}
+
+	found := map[string]bool{}
+	for _, f := range zr.File {
+		found[f.Name] = true
+	}
+	if !found["bin/app.exe"] {
+		t.Error("zip missing bin/app.exe")
+	}
+	if !found["VERSION"] {
+		t.Error("zip missing VERSION (virtual file)")
+	}
+
+	// Verify VERSION content
+	for _, f := range zr.File {
+		if f.Name == "VERSION" {
+			rc, err := f.Open()
+			if err != nil {
+				t.Fatalf("open VERSION: %v", err)
+			}
+			data, _ := io.ReadAll(rc)
+			rc.Close()
+			if string(data) != versionContent {
+				t.Errorf("VERSION content = %q, want %q", string(data), versionContent)
+			}
+		}
 	}
 }

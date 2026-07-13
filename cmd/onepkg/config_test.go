@@ -1363,3 +1363,124 @@ func TestValidateSystemOverlay(t *testing.T) {
 		})
 	}
 }
+
+func TestParseConfigWindowsService(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+
+	content := `
+name = "myapp"
+version = "v1.0.0"
+
+items = ["bin/myapp.exe"]
+
+[[services]]
+name = "myapp"
+exec = "bin/myapp.exe"
+
+[services.windows]
+start_type = "manual"
+recovery_delay_ms = 3000
+`
+	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := ParseConfig(configPath)
+	if err != nil {
+		t.Fatalf("ParseConfig returned error: %v", err)
+	}
+
+	if len(cfg.Services) != 1 {
+		t.Fatalf("len(Services) = %d, want 1", len(cfg.Services))
+	}
+	svc := cfg.Services[0]
+	if svc.Windows.StartType != "manual" {
+		t.Errorf("Windows.StartType = %q, want %q", svc.Windows.StartType, "manual")
+	}
+	if svc.Windows.RecoveryDelayMs == nil || *svc.Windows.RecoveryDelayMs != 3000 {
+		t.Errorf("Windows.RecoveryDelayMs = %v, want 3000", svc.Windows.RecoveryDelayMs)
+	}
+}
+
+func TestApplyDefaultsWindowsService(t *testing.T) {
+	cfg := &Config{
+		Name:    "myapp",
+		Version: "v1.0.0",
+		Items:   []string{"bin/myapp.exe"},
+		Services: []ServiceConfig{
+			{Exec: "bin/myapp.exe"},
+		},
+	}
+
+	cfg.ApplyDefaults()
+
+	svc := cfg.Services[0]
+	if svc.Windows.StartType != "auto" {
+		t.Errorf("Windows.StartType default = %q, want %q", svc.Windows.StartType, "auto")
+	}
+	if svc.Windows.RecoveryDelayMs == nil || *svc.Windows.RecoveryDelayMs != 5000 {
+		t.Errorf("Windows.RecoveryDelayMs default = %v, want 5000", svc.Windows.RecoveryDelayMs)
+	}
+}
+
+func TestApplyDefaultsWindowsRecoveryDelayZero(t *testing.T) {
+	zero := 0
+	cfg := &Config{
+		Name:    "myapp",
+		Version: "v1.0.0",
+		Items:   []string{"bin/myapp.exe"},
+		Services: []ServiceConfig{
+			{Exec: "bin/myapp.exe", Windows: WindowsService{RecoveryDelayMs: &zero}},
+		},
+	}
+	cfg.ApplyDefaults()
+	svc := cfg.Services[0]
+	if svc.Windows.RecoveryDelayMs == nil {
+		t.Fatal("RecoveryDelayMs is nil, expected non-nil (explicitly set to 0)")
+	}
+	if *svc.Windows.RecoveryDelayMs != 0 {
+		t.Errorf("RecoveryDelayMs = %d, want 0 (explicitly set, should not be overridden to default)", *svc.Windows.RecoveryDelayMs)
+	}
+}
+
+func TestValidateWindowsServiceStartType(t *testing.T) {
+	dir := t.TempDir()
+	binDir := filepath.Join(dir, "bin")
+	os.MkdirAll(binDir, 0755)
+	os.WriteFile(filepath.Join(binDir, "myapp.exe"), []byte("exe"), 0755)
+
+	tests := []struct {
+		name      string
+		startType string
+		wantErr   string
+	}{
+		{"valid auto", "auto", ""},
+		{"valid manual", "manual", ""},
+		{"valid disabled", "disabled", ""},
+		{"invalid value", "badtype", "start_type"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{
+				Name:    "myapp",
+				Version: "v1.0.0",
+				Items:   []string{"bin/myapp.exe"},
+				Services: []ServiceConfig{
+					{Name: "myapp", Exec: "bin/myapp.exe", Windows: WindowsService{StartType: tt.startType}},
+				},
+			}
+			err := cfg.Validate(dir)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Errorf("Validate() returned unexpected error: %v", err)
+				}
+			} else {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("Validate() error = %v, want error containing %q", err, tt.wantErr)
+				}
+			}
+		})
+	}
+}

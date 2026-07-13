@@ -28,17 +28,18 @@ onepkg/
 ## Commands
 
 ```bash
-# Build
-cd cmd/onepkg && go build -o onepkg .
+# Build (re)builds the embedded Windows stubs via the win-wrapper dependency)
+make build
 
-# Test all
-cd cmd/onepkg && go test ./... -v
+# Test all (generates stubs first, then runs the main + stub-module test suites)
+make test
 
-# Test specific package
+# Test a specific package — stubs must already exist, so run `make win-wrapper`
+# (or `make build`) once first; the //go:embed directives fail otherwise.
 cd cmd/onepkg && go test -run TestParseConfig -v
 cd cmd/onepkg && go test ./installer/ -v
 
-# Run (platform required)
+# Run (platform required). Same stub requirement: run `make win-wrapper` first.
 cd cmd/onepkg && go run . -c config.toml --platform linux-arm64
 cd cmd/onepkg && go run . -c config.toml --platform linux-arm64,linux-amd64,darwin-arm64 --output ./dist
 ```
@@ -66,5 +67,9 @@ cd cmd/onepkg && go run . -c config.toml --platform linux-arm64,linux-amd64,darw
 - Do not modify `build-package/` — it is a symlink to another project.
 - Generated shell scripts use `set -euo pipefail`. Pipe failures need `|| fail=1` suppression.
 - Path validation rejects `/..` and leading `..`, but allows `..` within filenames (e.g. `my..backup`).
-- MVP scope: Linux/macOS only. Windows `.ps1` and Windows Service are post-MVP.
+- Supported platforms: Linux (systemd), macOS (launchd), Windows (Windows Service via sc.exe).
+- Windows installers are self-extracting `.exe` files using pre-compiled stubs (see `installer/stubs/`).
+- To rebuild stubs after changing `installer/stub-src/wrapper.go`:
+  `cd cmd/onepkg/installer/stub-src && GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-H windowsgui" -o ../stubs/wrapper-stub-amd64.exe .`
+  (repeat with GOARCH=arm64 for the ARM64 stub)
 - Single service only (first `[[services]]` entry). Multiple services is post-MVP.

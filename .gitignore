@@ -1,1 +1,3 @@
 cmd/onepkg/onepkg
+cmd/onepkg/installer/stubs
+todo.md
