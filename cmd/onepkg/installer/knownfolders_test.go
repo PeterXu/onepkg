@@ -29,9 +29,9 @@ func TestKnownFoldersMap(t *testing.T) {
 
 func TestHasKnownFolderMarker(t *testing.T) {
 	trues := []string{
-		"{AppDataFolder}\\x",
-		"{AppDataFolder}",
-		"pre{LocalAppDataFolder}\\post",
+		"{dst.AppDataFolder}\\x",
+		"{dst.AppDataFolder}",
+		"pre{dst.LocalAppDataFolder}\\post",
 	}
 	for _, s := range trues {
 		if !HasKnownFolderMarker(s) {
@@ -40,9 +40,10 @@ func TestHasKnownFolderMarker(t *testing.T) {
 	}
 	falses := []string{
 		"C:\\plain\\path",
-		"",               // empty
-		"{AppData}",      // unknown name -> not a known marker
-		"$AppDataFolder", // dollar form is not a {marker}
+		"",                  // empty
+		"{AppDataFolder}",   // bare form: no dst. prefix -> not matched
+		"{dst.AppData}",     // dst. prefix but unknown name -> not a known marker
+		"$AppDataFolder",    // dollar form is not a {dst.} marker
 	}
 	for _, s := range falses {
 		if HasKnownFolderMarker(s) {
@@ -52,33 +53,38 @@ func TestHasKnownFolderMarker(t *testing.T) {
 }
 
 func TestValidateKnownFolderMarkers(t *testing.T) {
-	if err := ValidateKnownFolderMarkers("{AppDataFolder}\\MyApp"); err != nil {
+	if err := ValidateKnownFolderMarkers("{dst.AppDataFolder}\\MyApp"); err != nil {
 		t.Errorf("known marker returned error: %v", err)
 	}
 	if err := ValidateKnownFolderMarkers("C:\\plain"); err != nil {
 		t.Errorf("plain path returned error: %v", err)
 	}
-	if err := ValidateKnownFolderMarkers("{AppData}"); err == nil {
-		t.Error("unknown {AppData} should return an error")
+	if err := ValidateKnownFolderMarkers("{dst.AppData}"); err == nil {
+		t.Error("unknown {dst.AppData} should return an error")
+	} else if !strings.Contains(err.Error(), "AppData") {
+		t.Errorf("error should name the unknown variable, got: %v", err)
 	}
-	if err := ValidateKnownFolderMarkers("{AppDataFolder}{BogusFolder}"); err == nil {
+	if err := ValidateKnownFolderMarkers("{dst.AppDataFolder}{dst.BogusFolder}"); err == nil {
 		t.Error("mixed known+unknown should return an error naming BogusFolder")
 	} else if !strings.Contains(err.Error(), "BogusFolder") {
 		t.Errorf("error should name the unknown variable, got: %v", err)
 	}
 }
 
-func TestKnownFolderMarkersAndDollarVars(t *testing.T) {
-	got := KnownFolderMarkers("{LocalAppDataFolder}\\x{AppDataFolder}\\y{LocalAppDataFolder}{Unknown}")
+func TestKnownFolderMarkersAndReplaceMarkers(t *testing.T) {
+	got := KnownFolderMarkers("{dst.LocalAppDataFolder}\\x{dst.AppDataFolder}\\y{dst.LocalAppDataFolder}{dst.Unknown}")
 	want := []string{"AppDataFolder", "LocalAppDataFolder"} // deduped + sorted, unknown excluded
 	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
 		t.Errorf("KnownFolderMarkers = %v, want %v", got, want)
 	}
 
-	gotD := KnownFolderDollarVars("$AppDataFolder and $LocalAppDataFolder again $AppDataFolder and $Nope")
-	wantD := []string{"AppDataFolder", "LocalAppDataFolder"}
-	if len(gotD) != 2 || gotD[0] != wantD[0] || gotD[1] != wantD[1] {
-		t.Errorf("KnownFolderDollarVars = %v, want %v", gotD, wantD)
+	gotR := ReplaceMarkers(`pre{dst.AppDataFolder}\x{dst.LocalAppDataFolder}\y{dst.Unknown}`)
+	wantR := `pre$AppDataFolder\x$LocalAppDataFolder\y{dst.Unknown}` // known -> $Name; unknown left intact
+	if gotR != wantR {
+		t.Errorf("ReplaceMarkers = %q, want %q", gotR, wantR)
+	}
+	if ReplaceMarkers("no markers here") != "no markers here" {
+		t.Error("ReplaceMarkers should be a no-op on marker-free strings")
 	}
 }
 
@@ -90,7 +96,6 @@ func TestEmitKnownFolderDefs(t *testing.T) {
 	if !strings.Contains(out, "$LocalAppDataFolder = [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)\n") {
 		t.Errorf("missing LocalAppDataFolder def, got:\n%s", out)
 	}
-	// AppDataFolder appears once (deduped).
 	if strings.Count(out, "$AppDataFolder =") != 1 {
 		t.Errorf("AppDataFolder def not deduped, got:\n%s", out)
 	}
@@ -101,11 +106,11 @@ func TestEmitKnownFolderDefs(t *testing.T) {
 
 func TestEmitPathExpr(t *testing.T) {
 	cases := []struct{ in, want string }{
-		{`C:\plain\path`, `'C:\plain\path'`},                                                            // bare -> single-quoted literal
-		{`{AppDataFolder}\MyApp\data`, `$AppDataFolder + '\MyApp\data'`},                                // marker at start
-		{`{AppDataFolder}`, `$AppDataFolder`},                                                           // marker only
-		{`pre\{LocalAppDataFolder}\post`, `'pre\' + $LocalAppDataFolder + '\post'`},                     // marker in middle
-		{`{AppDataFolder}\{LocalAppDataFolder}\x`, `$AppDataFolder + '\' + $LocalAppDataFolder + '\x'`}, // multiple
+		{`C:\plain\path`, `'C:\plain\path'`},                                                              // bare -> single-quoted literal
+		{`{dst.AppDataFolder}\MyApp\data`, `$AppDataFolder + '\MyApp\data'`},                              // marker at start
+		{`{dst.AppDataFolder}`, `$AppDataFolder`},                                                         // marker only
+		{`pre\{dst.LocalAppDataFolder}\post`, `'pre\' + $LocalAppDataFolder + '\post'`},                   // marker in middle
+		{`{dst.AppDataFolder}\{dst.LocalAppDataFolder}\x`, `$AppDataFolder + '\' + $LocalAppDataFolder + '\x'`}, // multiple
 	}
 	for _, c := range cases {
 		got := EmitPathExpr(c.in)

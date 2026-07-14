@@ -593,7 +593,7 @@ func TestBuildForPlatformRejectsKnownFolderOnLinux(t *testing.T) {
 		Name:    "kf",
 		Version: "v1",
 		Mode:    "install",
-		Dirs:    []DirConfig{{Path: `{AppDataFolder}\MyApp`, Mode: "0755"}},
+		Dirs:    []DirConfig{{Path: `{dst.AppDataFolder}\MyApp`, Mode: "0755"}},
 	}
 	err := BuildForPlatform(cfg, "linux-amd64", nil, nil, nil, "")
 	if err == nil {
@@ -609,7 +609,7 @@ func TestBuildForPlatformRejectsKnownFolderOverlayOnDarwin(t *testing.T) {
 		Name:          "kf",
 		Version:       "v1",
 		Mode:          "install",
-		SystemOverlay: []OverlayConfig{{System: `{ProgramFiles64Folder}\OtherApp\cfg`, Item: "etc/cfg"}},
+		SystemOverlay: []OverlayConfig{{System: `{dst.ProgramFiles64Folder}\OtherApp\cfg`, Item: "etc/cfg"}},
 	}
 	err := BuildForPlatform(cfg, "darwin-arm64", nil, nil, nil, "")
 	if err == nil {
@@ -632,7 +632,7 @@ version = "v1.0.0"
 items = ["bin/myapp.exe"]
 
 [[dirs]]
-path = "{AppDataFolder}\\MyApp\\data"
+path = "{dst.AppDataFolder}\\MyApp\\data"
 mode = "0755"
 `
 	configPath := filepath.Join(projectDir, "config.toml")

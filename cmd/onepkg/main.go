@@ -103,13 +103,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	cfg, err := ParseConfig(configPath)
+	cfg, err := loadConfig(configPath)
 	if err != nil {
-		fmt.Printf("Error parsing config: %v\n", err)
+		fmt.Printf("Error loading config: %v\n", err)
 		os.Exit(1)
 	}
-
-	cfg.ApplyDefaults()
 
 	if outputOverride != "" {
 		cfg.OutputDir = outputOverride
@@ -163,6 +161,22 @@ func main() {
 	}
 
 	fmt.Printf("\nBuilt %d platform(s)\n", len(platforms))
+}
+
+// loadConfig parses config.toml, expands {env.NAME} host variables, and applies
+// defaults. It is the testable seam for the {env.NAME} wiring (main() otherwise
+// orchestrates inline). Validate is called separately by main() so its error
+// message and the output-override step are preserved.
+func loadConfig(configPath string) (*Config, error) {
+	cfg, err := ParseConfig(configPath)
+	if err != nil {
+		return nil, err
+	}
+	if err := cfg.ExpandEnv(); err != nil {
+		return nil, err
+	}
+	cfg.ApplyDefaults()
+	return cfg, nil
 }
 
 // unameArch maps GOARCH to the value uname -m returns on the target system.

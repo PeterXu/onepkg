@@ -98,8 +98,8 @@ func TestGeneratePowerShellRunnerKnownFolders(t *testing.T) {
 		Platform:     "windows-amd64",
 		ExpectedArch: "AMD64",
 		Commands: []CommandSpec{
-			{Exec: "bin/app.exe", Args: []string{"--config", `{LocalAppDataFolder}\MyApp\cfg.json`}},
-			{Shell: `Copy-Item profile.json "$AppDataFolder\MyApp\"`},
+			{Exec: "bin/app.exe", Args: []string{"--config", `{dst.LocalAppDataFolder}\MyApp\cfg.json`}},
+			{Shell: `Copy-Item profile.json "{dst.AppDataFolder}\MyApp\"`},
 		},
 	}
 	out, err := GeneratePowerShellRunner(cfg)
@@ -107,14 +107,19 @@ func TestGeneratePowerShellRunnerKnownFolders(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out, "$AppDataFolder = [Environment]::GetFolderPath([Environment+SpecialFolder]::ApplicationData)") {
-		t.Error("missing $AppDataFolder def (referenced via $Var in shell)")
+		t.Error("missing $AppDataFolder def (referenced via {dst.Name} in shell)")
 	}
 	if !strings.Contains(out, "$LocalAppDataFolder = [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)") {
-		t.Error("missing $LocalAppDataFolder def (referenced via {Var} in args)")
+		t.Error("missing $LocalAppDataFolder def (referenced via {dst.Name} in args)")
 	}
 	// Marked arg rendered as a parenthesized concatenation in the invocation.
 	if !strings.Contains(out, "($LocalAppDataFolder + '\\MyApp\\cfg.json')") {
 		t.Errorf("missing marked arg expression in invocation; got:\n%s", out)
+	}
+	// Shell's {dst.AppDataFolder} is rewritten to $AppDataFolder in the emitted Invoke-Expression.
+	wantShell := `Invoke-Expression 'Copy-Item profile.json "$AppDataFolder\MyApp\"'`
+	if !strings.Contains(out, wantShell) {
+		t.Errorf("shell marker not rewritten to $Var; want %q, got:\n%s", wantShell, out)
 	}
 }
 

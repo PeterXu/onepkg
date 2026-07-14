@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"onepkg/installer"
 )
 
 func TestParseConfig(t *testing.T) {
@@ -1737,11 +1739,11 @@ version = "v1.0.0"
 items = ["bin/app", "default.conf"]
 
 [[dirs]]
-path = "{AppDataFolder}\\MyApp\\data"
+path = "{dst.AppDataFolder}\\MyApp\\data"
 mode = "0755"
 
 [[system_overlay]]
-system = "{ProgramFiles64Folder}\\OtherApp\\config.json"
+system = "{dst.ProgramFiles64Folder}\\OtherApp\\config.json"
 item = "default.conf"
 `
 	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(content), 0644); err != nil {
@@ -1769,7 +1771,7 @@ version = "v1.0.0"
 items = ["bin/app"]
 
 [[dirs]]
-path = "{AppData}\\MyApp"
+path = "{dst.AppData}\\MyApp"
 `
 	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(content), 0644); err != nil {
 		t.Fatal(err)
@@ -1825,7 +1827,7 @@ items = ["bin/app.exe"]
 
 [[commands]]
 exec = "bin/app.exe"
-args = ["--config", "{AppDataFolder}\\MyApp\\config.json"]
+args = ["--config", "{dst.AppDataFolder}\\MyApp\\config.json"]
 `
 	os.WriteFile(filepath.Join(dir, "config.toml"), []byte(content), 0644)
 	cfg, err := ParseConfig(filepath.Join(dir, "config.toml"))
@@ -1851,7 +1853,7 @@ items = ["bin/app.exe"]
 
 [[commands]]
 exec = "bin/app.exe"
-args = ["{BogusFolder}\\x"]
+args = ["{dst.BogusFolder}\\x"]
 `
 	os.WriteFile(filepath.Join(dir, "config.toml"), []byte(content), 0644)
 	cfg, err := ParseConfig(filepath.Join(dir, "config.toml"))
@@ -1861,5 +1863,220 @@ args = ["{BogusFolder}\\x"]
 	cfg.ApplyDefaults()
 	if err := cfg.Validate(dir); err == nil {
 		t.Error("Validate should reject unknown marker in run args")
+	}
+}
+
+func TestExpandEnvSubstitutesAllStringFields(t *testing.T) {
+	t.Setenv("ONEPKG_T2_NAME", "fromenv")
+	t.Setenv("ONEPKG_T2_ROOT", "/opt/root")
+	cfg := &Config{
+		Name:  "{env.ONEPKG_T2_NAME}",
+		Items: []string{"{env.ONEPKG_T2_ROOT}/bin/app", "etc/cfg"},
+		Dirs:  []DirConfig{{Path: `{env.ONEPKG_T2_ROOT}\{dst.AppDataFolder}\x`}},
+		Services: []ServiceConfig{{
+			Linux: LinuxService{Environment: map[string]string{"TOKEN": "{env.ONEPKG_T2_NAME}"}},
+		}},
+	}
+	if err := cfg.ExpandEnv(); err != nil {
+		t.Fatalf("ExpandEnv: %v", err)
+	}
+	if cfg.Name != "fromenv" {
+		t.Errorf("Name = %q, want fromenv", cfg.Name)
+	}
+	if cfg.Items[0] != "/opt/root/bin/app" {
+		t.Errorf("Items[0] = %q, want /opt/root/bin/app", cfg.Items[0])
+	}
+	// {dst.*} and {platform} are left untouched by ExpandEnv (different prefix);
+	// only the {env.*} value is substituted (forward slashes preserved verbatim).
+	if cfg.Dirs[0].Path != `/opt/root\{dst.AppDataFolder}\x` {
+		t.Errorf("Dirs[0].Path = %q, want /opt/root\\{dst.AppDataFolder}\\x", cfg.Dirs[0].Path)
+	}
+	if got := cfg.Services[0].Linux.Environment["TOKEN"]; got != "fromenv" {
+		t.Errorf("environment TOKEN = %q, want fromenv", got)
+	}
+}
+
+func TestExpandEnvErrorsOnMissingSortedDeduped(t *testing.T) {
+	t.Setenv("ONEPKG_T2_SET", "v")
+	cfg := &Config{
+		Name:      "{env.ONEPKG_T2_SET}",      // present -> no error
+		Version:   "{env.ONEPKG_T2_MISSING_B}", // missing
+		OutputDir: "{env.ONEPKG_T2_MISSING_A}", // missing
+	}
+	err := cfg.ExpandEnv()
+	if err == nil {
+		t.Fatal("ExpandEnv should error on missing env vars")
+	}
+	if !strings.Contains(err.Error(), "ONEPKG_T2_MISSING_A") || !strings.Contains(err.Error(), "ONEPKG_T2_MISSING_B") {
+		t.Errorf("error should list both missing vars, got: %v", err)
+	}
+	// Sorted: A before B in the message.
+	if strings.Index(err.Error(), "ONEPKG_T2_MISSING_A") > strings.Index(err.Error(), "ONEPKG_T2_MISSING_B") {
+		t.Errorf("missing vars should be sorted, got: %v", err)
+	}
+}
+
+func TestLoadConfigExpandsEnv(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "bin"), 0755)
+	os.WriteFile(filepath.Join(dir, "bin", "app"), []byte("x"), 0755)
+	content := `
+name = "envpkg"
+version = "{env.ONEPKG_T2_VER}"
+items = ["bin/app"]
+`
+	path := filepath.Join(dir, "config.toml")
+	os.WriteFile(path, []byte(content), 0644)
+
+	t.Setenv("ONEPKG_T2_VER", "v9.9.9")
+	cfg, err := loadConfig(path)
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+	if cfg.Version != "v9.9.9" {
+		t.Errorf("Version = %q, want v9.9.9 (env not expanded)", cfg.Version)
+	}
+}
+
+func TestLoadConfigErrorsOnMissingEnv(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "bin"), 0755)
+	os.WriteFile(filepath.Join(dir, "bin", "app"), []byte("x"), 0755)
+	content := `
+name = "envpkg"
+version = "{env.ONEPKG_T2_DEFINITELY_UNSET}"
+items = ["bin/app"]
+`
+	path := filepath.Join(dir, "config.toml")
+	os.WriteFile(path, []byte(content), 0644)
+
+	_, err := loadConfig(path)
+	if err == nil {
+		t.Fatal("loadConfig should error when a referenced env var is unset")
+	}
+	if !strings.Contains(err.Error(), "ONEPKG_T2_DEFINITELY_UNSET") {
+		t.Errorf("error should name the missing var, got: %v", err)
+	}
+}
+
+func TestValidateRejectsStrayDstMarkerInItems(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "bin"), 0755)
+	os.WriteFile(filepath.Join(dir, "bin", "app"), []byte("x"), 0755)
+	content := `
+name = "x"
+version = "v1"
+items = ["bin/app", "{dst.AppDataFolder}/cfg"]
+`
+	os.WriteFile(filepath.Join(dir, "config.toml"), []byte(content), 0644)
+	cfg, _ := ParseConfig(filepath.Join(dir, "config.toml"))
+	cfg.ApplyDefaults()
+	err := cfg.Validate(dir)
+	if err == nil {
+		t.Fatal("Validate should reject {dst.NAME} in items[]")
+	}
+	if !strings.Contains(err.Error(), "{dst.NAME}") {
+		t.Errorf("error should explain {dst.NAME} placement, got: %v", err)
+	}
+}
+
+func TestValidateRejectsStrayDstMarkerInName(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "bin"), 0755)
+	os.WriteFile(filepath.Join(dir, "bin", "app"), []byte("x"), 0755)
+	content := `
+name = "{dst.AppDataFolder}"
+version = "v1"
+items = ["bin/app"]
+`
+	os.WriteFile(filepath.Join(dir, "config.toml"), []byte(content), 0644)
+	cfg, _ := ParseConfig(filepath.Join(dir, "config.toml"))
+	cfg.ApplyDefaults()
+	if err := cfg.Validate(dir); err == nil {
+		t.Fatal("Validate should reject {dst.NAME} in name")
+	}
+}
+
+func TestValidateAllowsDstMarkerInRunShellAndArgs(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "bin"), 0755)
+	os.WriteFile(filepath.Join(dir, "bin", "app.exe"), []byte("x"), 0755)
+	content := `
+name = "x"
+version = "v1"
+mode = "run"
+items = ["bin/app.exe"]
+
+[[commands]]
+exec = "bin/app.exe"
+args = ["--config", "{dst.AppDataFolder}\\cfg.json"]
+
+[[commands]]
+shell = "Copy-Item p \"{dst.AppDataFolder}\\x\""
+`
+	os.WriteFile(filepath.Join(dir, "config.toml"), []byte(content), 0644)
+	cfg, _ := ParseConfig(filepath.Join(dir, "config.toml"))
+	cfg.ApplyDefaults()
+	if err := cfg.Validate(dir); err != nil {
+		t.Fatalf("Validate should allow {dst.NAME} in run args and shell: %v", err)
+	}
+}
+
+// {env.X} applies to EVERY string field, including run-mode commands[].args and
+// commands[].shell (build-time literal substitution), and the substituted value
+// flows through into the generated run.ps1. Distinct from {dst.X} (target-time).
+func TestExpandEnvSubstitutesRunCommandArgsAndShell(t *testing.T) {
+	t.Setenv("ONEPKG_ENVARG", "injected")
+	cfg := &Config{
+		Name: "x",
+		Mode: "run",
+		Commands: []CommandConfig{
+			{Exec: "bin/app.exe", Args: []string{"--config", `{env.ONEPKG_ENVARG}\cfg.json`}},
+			{Shell: `Write-Host {env.ONEPKG_ENVARG}`},
+		},
+	}
+	if err := cfg.ExpandEnv(); err != nil {
+		t.Fatalf("ExpandEnv: %v", err)
+	}
+	if got := cfg.Commands[0].Args[1]; got != `injected\cfg.json` {
+		t.Errorf("args[1] = %q, want injected\\cfg.json", got)
+	}
+	if got := cfg.Commands[1].Shell; got != "Write-Host injected" {
+		t.Errorf("shell = %q, want 'Write-Host injected'", got)
+	}
+
+	// End-to-end: the env-substituted arg flows into the generated run.ps1 invocation.
+	cmds := make([]installer.CommandSpec, len(cfg.Commands))
+	for i, c := range cfg.Commands {
+		cmds[i] = installer.CommandSpec{Exec: c.Exec, Args: c.Args, Shell: c.Shell}
+	}
+	out, err := installer.GeneratePowerShellRunner(installer.PowerShellRunnerConfig{
+		Name: "x", Version: "v1", Platform: "windows-amd64", ExpectedArch: "AMD64", Commands: cmds,
+	})
+	if err != nil {
+		t.Fatalf("GeneratePowerShellRunner: %v", err)
+	}
+	if !strings.Contains(out, `'injected\cfg.json'`) {
+		t.Errorf("run.ps1 should contain the env-substituted arg literal; got:\n%s", out)
+	}
+}
+
+// {dst.NAME} in services[].exec is a stray marker (exec is a bundled-file path,
+// not a target-resolved path) and must be rejected. Spec-listed stray case.
+func TestValidateRejectsStrayDstMarkerInServiceExec(t *testing.T) {
+	cfg := &Config{
+		Name:     "x",
+		Version:  "v1",
+		Mode:     "install",
+		Items:    []string{"bin/app"},
+		Services: []ServiceConfig{{Name: "x", Exec: "{dst.AppDataFolder}"}},
+	}
+	cfg.ApplyDefaults()
+	err := cfg.Validate(t.TempDir())
+	if err == nil {
+		t.Fatal("Validate should reject {dst.NAME} in services[].exec")
+	}
+	if !strings.Contains(err.Error(), "{dst.NAME}") {
+		t.Errorf("error should explain {dst.NAME} placement, got: %v", err)
 	}
 }

@@ -27,11 +27,9 @@ var KnownFolders = map[string]string{
 	"CommonDocumentsFolder": "CommonDocuments",
 }
 
-// markerRe matches a {Name} token in path-string config fields.
-var markerRe = regexp.MustCompile(`\{(\w+)\}`)
-
-// dollarRe matches a $Name token as written in run-mode shell expressions.
-var dollarRe = regexp.MustCompile(`\$([A-Za-z_]\w*)`)
+// markerRe matches a {dst.Name} token in path-string config fields. The captured
+// group is the bare folder name (e.g. "AppDataFolder"), which keys KnownFolders.
+var markerRe = regexp.MustCompile(`\{dst\.(\w+)\}`)
 
 // HasKnownFolderMarker reports whether s contains at least one {KnownName} token.
 // Unknown braces such as {Foo} do not count; rejecting those is
@@ -40,12 +38,12 @@ func HasKnownFolderMarker(s string) bool {
 	return len(KnownFolderMarkers(s)) > 0
 }
 
-// ValidateKnownFolderMarkers returns an error if s contains any {X} token whose
+// ValidateKnownFolderMarkers returns an error if s contains any {dst.X} token whose
 // name X is not a known folder. Known markers are allowed.
 func ValidateKnownFolderMarkers(s string) error {
 	for _, m := range markerRe.FindAllStringSubmatch(s, -1) {
 		if _, ok := KnownFolders[m[1]]; !ok {
-			return fmt.Errorf("unknown Windows known-folder variable {%s}; supported: %s", m[1], knownFolderNameList())
+			return fmt.Errorf("unknown Windows known-folder variable {dst.%s}; supported: %s", m[1], knownFolderNameList())
 		}
 	}
 	return nil
@@ -63,16 +61,17 @@ func KnownFolderMarkers(s string) []string {
 	return dedupeSorted(names)
 }
 
-// KnownFolderDollarVars returns the deduped, sorted known-folder names that
-// appear as $Name tokens in s (used to detect variables referenced in run shell).
-func KnownFolderDollarVars(s string) []string {
-	var names []string
-	for _, m := range dollarRe.FindAllStringSubmatch(s, -1) {
+// ReplaceMarkers replaces each known {dst.Name} token in s with the PowerShell
+// variable reference $Name, for inline use inside run-mode shell expressions.
+// Unknown {dst.X} tokens are left in place; validation rejects them earlier.
+func ReplaceMarkers(s string) string {
+	return markerRe.ReplaceAllStringFunc(s, func(tok string) string {
+		m := markerRe.FindStringSubmatch(tok)
 		if _, ok := KnownFolders[m[1]]; ok {
-			names = append(names, m[1])
+			return "$" + m[1]
 		}
-	}
-	return dedupeSorted(names)
+		return tok
+	})
 }
 
 // EmitKnownFolderDefs emits a "$<Name> = [Environment]::GetFolderPath(...)" line
@@ -87,9 +86,9 @@ func EmitKnownFolderDefs(names []string) string {
 
 // EmitPathExpr renders a config path value as a PowerShell expression.
 // A value without markers is a single-quoted literal (identical to psQuote).
-// A value with {KnownName} markers is a concatenation referencing the
+// A value with {dst.Name} markers is a concatenation referencing the
 // runtime-resolved $<Name> variable, e.g. "$AppDataFolder + '\MyApp'".
-// Unknown {X} tokens are left as single-quoted literals (safety; validation
+// Unknown {dst.X} tokens are left as single-quoted literals (safety; validation
 // rejects them earlier).
 func EmitPathExpr(s string) string {
 	if !markerRe.MatchString(s) {

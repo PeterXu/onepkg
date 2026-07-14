@@ -168,6 +168,11 @@ func (c *Config) Validate(configDir string) error {
 		return fmt.Errorf("mode %q must be \"install\" or \"run\"", c.Mode)
 	}
 
+	// {dst.NAME} is only resolvable in path/args/shell fields; reject it anywhere else.
+	if err := c.validateNoStrayDstMarkers(); err != nil {
+		return err
+	}
+
 	// Item existence / traversal checks apply to items present in either mode.
 	for _, item := range c.Items {
 		if filepath.IsAbs(item) {
@@ -278,7 +283,7 @@ func (c *Config) validateInstall(configDir string) error {
 		if strings.Contains(overlay.System, "..") {
 			return fmt.Errorf("path traversal not allowed in overlay system path %q", overlay.System)
 		}
-		// A marked system path (e.g. {AppDataFolder}\...) is absolute on the target
+		// A marked system path (e.g. {dst.AppDataFolder}\...) is absolute on the target
 		// but cannot be Go-evaluated for absoluteness or critical-path safety, so
 		// those checks only apply to literal paths.
 		if !installer.HasKnownFolderMarker(overlay.System) {

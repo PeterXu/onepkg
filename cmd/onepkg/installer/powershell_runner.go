@@ -45,12 +45,12 @@ func GeneratePowerShellRunner(cfg PowerShellRunnerConfig) (string, error) {
 	b.WriteString(powershellArchVars(cfg.ExpectedArch))
 	b.WriteString("\n")
 
-	// Windows known-folder definitions: only variables referenced by the
-	// commands (via $Name in shell or {Name} in args).
+	// Windows known-folder definitions: only variables referenced by the commands
+	// (via {dst.Name} in shell or args).
 	var kfNames []string
 	for _, cmd := range cfg.Commands {
 		if cmd.Shell != "" {
-			kfNames = append(kfNames, KnownFolderDollarVars(cmd.Shell)...)
+			kfNames = append(kfNames, KnownFolderMarkers(cmd.Shell)...)
 		}
 		for _, a := range cmd.Args {
 			kfNames = append(kfNames, KnownFolderMarkers(a)...)
@@ -118,12 +118,12 @@ func runnerCommandBlock(cmd CommandSpec) string {
 		b.WriteString("\n")
 		b.WriteString("    if ((-not $?) -or ($LASTEXITCODE -ne 0)) { Write-Host ('Command failed with exit code ' + $LASTEXITCODE); Read-Host 'Press Enter to exit'; exit 1 }\n")
 	} else {
-		b.WriteString("    Write-Host 'Running:' " + psQuote(cmd.Shell) + "\n")
+		b.WriteString("    Write-Host 'Running:' " + psQuote(ReplaceMarkers(cmd.Shell)) + "\n")
 		// Reset $LASTEXITCODE so we can detect failures. $? reflects the evaluated expression's success,
 		// but for non-terminating errors inside Invoke-Expression, may not reliably become $false depending on
 		// $ErrorActionPreference. $LASTEXITCODE is the reliable signal for native-exe failures; $? catches terminating/cmdlet failures.
 		b.WriteString("    $LASTEXITCODE = 0\n")
-		b.WriteString("    Invoke-Expression " + psQuote(cmd.Shell) + "\n")
+		b.WriteString("    Invoke-Expression " + psQuote(ReplaceMarkers(cmd.Shell)) + "\n")
 		b.WriteString("    if ((-not $?) -or ($LASTEXITCODE -ne 0)) { Write-Host 'Command failed'; Read-Host 'Press Enter to exit'; exit 1 }\n")
 	}
 	return b.String()

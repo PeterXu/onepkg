@@ -192,7 +192,7 @@ func TestGeneratePowerShellInstallerKnownFolderDirs(t *testing.T) {
 		DefaultDir:   `C:\Program Files\myapp`,
 		ServiceName:  "",
 		Dirs: []DirSpec{
-			{Path: `{AppDataFolder}\MyApp\data`, Owner: "myapp", Mode: "0755"},
+			{Path: `{dst.AppDataFolder}\MyApp\data`, Owner: "myapp", Mode: "0755"},
 		},
 	}
 	out, err := GeneratePowerShellInstaller(cfg)
@@ -217,7 +217,7 @@ func TestGeneratePowerShellInstallerKnownFolderOverlay(t *testing.T) {
 		DefaultDir:   `C:\Program Files\myapp`,
 		ServiceName:  "",
 		Overlays: []OverlaySpec{
-			{System: `{ProgramFiles64Folder}\OtherApp\config.json`, Item: "etc/config.txt"},
+			{System: `{dst.ProgramFiles64Folder}\OtherApp\config.json`, Item: "etc/config.txt"},
 		},
 	}
 	out, err := GeneratePowerShellInstaller(cfg)
