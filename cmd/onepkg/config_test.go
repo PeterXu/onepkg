@@ -1318,7 +1318,7 @@ func TestValidateSystemOverlay(t *testing.T) {
 					{System: "", Item: "bin/myapp"},
 				},
 			},
-			wantErr: "must be an absolute path",
+			wantErr: "overlay system path is required",
 		},
 		{
 			name: "overlay item empty",
@@ -1715,5 +1715,151 @@ func TestValidateBadMode(t *testing.T) {
 	cfg.ApplyDefaults()
 	if err := cfg.Validate(dir); err == nil {
 		t.Error("Validate should reject unknown mode")
+	}
+}
+
+func TestValidateKnownFolderInDirsAndOverlay(t *testing.T) {
+	dir := t.TempDir()
+	// Real items so install-mode item / overlay-item checks pass.
+	binDir := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(binDir, "app"), []byte("x"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "default.conf"), []byte("k=v"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	content := `
+name = "kf"
+version = "v1.0.0"
+items = ["bin/app", "default.conf"]
+
+[[dirs]]
+path = "{AppDataFolder}\\MyApp\\data"
+mode = "0755"
+
+[[system_overlay]]
+system = "{ProgramFiles64Folder}\\OtherApp\\config.json"
+item = "default.conf"
+`
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := ParseConfig(filepath.Join(dir, "config.toml"))
+	if err != nil {
+		t.Fatalf("ParseConfig: %v", err)
+	}
+	cfg.ApplyDefaults()
+	if err := cfg.Validate(dir); err != nil {
+		t.Fatalf("Validate should accept known-folder markers: %v", err)
+	}
+}
+
+func TestValidateRejectsUnknownFolderMarker(t *testing.T) {
+	dir := t.TempDir()
+	binDir := filepath.Join(dir, "bin")
+	os.MkdirAll(binDir, 0755)
+	os.WriteFile(filepath.Join(binDir, "app"), []byte("x"), 0755)
+
+	content := `
+name = "kf"
+version = "v1.0.0"
+items = ["bin/app"]
+
+[[dirs]]
+path = "{AppData}\\MyApp"
+`
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := ParseConfig(filepath.Join(dir, "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.ApplyDefaults()
+	err = cfg.Validate(dir)
+	if err == nil {
+		t.Fatal("Validate should reject unknown marker {AppData}")
+	}
+	if !strings.Contains(err.Error(), "AppData") {
+		t.Errorf("error should name the unknown variable, got: %v", err)
+	}
+}
+
+func TestValidateOverlayUnmarkedStillRequiresAbs(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "bin"), 0755)
+	os.WriteFile(filepath.Join(dir, "bin", "app"), []byte("x"), 0755)
+	content := `
+name = "kf"
+version = "v1.0.0"
+items = ["bin/app"]
+
+[[system_overlay]]
+system = "relative/path"
+item = "bin/app"
+`
+	os.WriteFile(filepath.Join(dir, "config.toml"), []byte(content), 0644)
+	cfg, err := ParseConfig(filepath.Join(dir, "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.ApplyDefaults()
+	if err := cfg.Validate(dir); err == nil {
+		t.Error("unmarked non-absolute overlay system should still be rejected")
+	}
+}
+
+func TestValidateRunArgsKnownFolder(t *testing.T) {
+	dir := t.TempDir()
+	binDir := filepath.Join(dir, "bin")
+	os.MkdirAll(binDir, 0755)
+	os.WriteFile(filepath.Join(binDir, "app.exe"), []byte("x"), 0755)
+	content := `
+name = "kf"
+version = "v1.0.0"
+mode = "run"
+items = ["bin/app.exe"]
+
+[[commands]]
+exec = "bin/app.exe"
+args = ["--config", "{AppDataFolder}\\MyApp\\config.json"]
+`
+	os.WriteFile(filepath.Join(dir, "config.toml"), []byte(content), 0644)
+	cfg, err := ParseConfig(filepath.Join(dir, "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.ApplyDefaults()
+	if err := cfg.Validate(dir); err != nil {
+		t.Fatalf("Validate should accept known marker in run args: %v", err)
+	}
+}
+
+func TestValidateRunArgsRejectsUnknownFolder(t *testing.T) {
+	dir := t.TempDir()
+	binDir := filepath.Join(dir, "bin")
+	os.MkdirAll(binDir, 0755)
+	os.WriteFile(filepath.Join(binDir, "app.exe"), []byte("x"), 0755)
+	content := `
+name = "kf"
+version = "v1.0.0"
+mode = "run"
+items = ["bin/app.exe"]
+
+[[commands]]
+exec = "bin/app.exe"
+args = ["{BogusFolder}\\x"]
+`
+	os.WriteFile(filepath.Join(dir, "config.toml"), []byte(content), 0644)
+	cfg, err := ParseConfig(filepath.Join(dir, "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.ApplyDefaults()
+	if err := cfg.Validate(dir); err == nil {
+		t.Error("Validate should reject unknown marker in run args")
 	}
 }

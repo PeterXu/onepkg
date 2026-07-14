@@ -201,6 +201,21 @@ func BuildForPlatform(cfg *Config, platform string, entries []FileEntry, tarData
 		return fmt.Errorf("mode=\"run\" is Windows-only; got platform %q", platform)
 	}
 
+	// Windows known-folder variables in install path fields are not resolvable on
+	// Linux/macOS targets; fail fast rather than emit a meaningless literal.
+	if goos != "windows" {
+		for _, d := range cfg.Dirs {
+			if installer.HasKnownFolderMarker(d.Path) {
+				return fmt.Errorf("Windows known-folder variable in dirs[].path %q is not supported on %s; build for windows or remove it", d.Path, goos)
+			}
+		}
+		for _, o := range cfg.SystemOverlay {
+			if installer.HasKnownFolderMarker(o.System) {
+				return fmt.Errorf("Windows known-folder variable in system_overlay[].system %q is not supported on %s; build for windows or remove it", o.System, goos)
+			}
+		}
+	}
+
 	versionContent, err := GenerateVersion(VersionInfo{
 		Name:     cfg.Name,
 		Version:  cfg.Version,

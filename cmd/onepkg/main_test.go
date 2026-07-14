@@ -587,3 +587,84 @@ shell = "Write-Host hello"
 		t.Error("shell-only run exe should not contain Expand-Archive")
 	}
 }
+
+func TestBuildForPlatformRejectsKnownFolderOnLinux(t *testing.T) {
+	cfg := &Config{
+		Name:    "kf",
+		Version: "v1",
+		Mode:    "install",
+		Dirs:    []DirConfig{{Path: `{AppDataFolder}\MyApp`, Mode: "0755"}},
+	}
+	err := BuildForPlatform(cfg, "linux-amd64", nil, nil, nil, "")
+	if err == nil {
+		t.Fatal("BuildForPlatform should reject a marked dirs path on linux")
+	}
+	if !strings.Contains(err.Error(), "not supported on linux") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestBuildForPlatformRejectsKnownFolderOverlayOnDarwin(t *testing.T) {
+	cfg := &Config{
+		Name:          "kf",
+		Version:       "v1",
+		Mode:          "install",
+		SystemOverlay: []OverlayConfig{{System: `{ProgramFiles64Folder}\OtherApp\cfg`, Item: "etc/cfg"}},
+	}
+	err := BuildForPlatform(cfg, "darwin-arm64", nil, nil, nil, "")
+	if err == nil {
+		t.Fatal("BuildForPlatform should reject a marked overlay system on darwin")
+	}
+	if !strings.Contains(err.Error(), "not supported on darwin") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestBuildForPlatformWindowsAllowsKnownFolderDirs(t *testing.T) {
+	projectDir := t.TempDir()
+	binDir := filepath.Join(projectDir, "bin")
+	os.MkdirAll(binDir, 0755)
+	os.WriteFile(filepath.Join(binDir, "myapp.exe"), []byte("fake-exe"), 0755)
+
+	content := `
+name = "myapp"
+version = "v1.0.0"
+items = ["bin/myapp.exe"]
+
+[[dirs]]
+path = "{AppDataFolder}\\MyApp\\data"
+mode = "0755"
+`
+	configPath := filepath.Join(projectDir, "config.toml")
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	cfg, err := ParseConfig(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.ApplyDefaults()
+	if err := cfg.Validate(projectDir); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	resolved, err := ResolveItems(projectDir, cfg.Items, "windows-amd64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := CollectFilesResolved(projectDir, resolved, cfg.Exclude)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outputDir := filepath.Join(projectDir, "packages")
+	os.MkdirAll(outputDir, 0755)
+
+	if err := BuildForPlatform(cfg, "windows-amd64", entries, nil, nil, outputDir); err != nil {
+		t.Fatalf("BuildForPlatform on windows should accept marked dirs: %v", err)
+	}
+	exe, err := os.ReadFile(filepath.Join(outputDir, "myapp_v1.0.0_windows_amd64.exe"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(exe, []byte("$AppDataFolder = [Environment]::GetFolderPath([Environment+SpecialFolder]::ApplicationData)")) {
+		t.Error("embedded install.ps1 missing the $AppDataFolder definition")
+	}
+}

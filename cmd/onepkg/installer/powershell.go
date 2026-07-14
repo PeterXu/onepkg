@@ -103,6 +103,18 @@ func GeneratePowerShellInstaller(cfg PowerShellConfig) (string, error) {
 	fmt.Fprintf(&b, "$PKG_PLATFORM = %s\n", psQuote(cfg.Platform))
 	b.WriteString(powershellArchVars(cfg.ExpectedArch))
 	fmt.Fprintf(&b, "$DEFAULT_DIR = %s\n", psQuote(cfg.DefaultDir))
+
+	// Windows known-folder definitions: only the variables referenced by
+	// dirs/overlay paths (bare configs emit nothing).
+	var kfNames []string
+	for _, d := range cfg.Dirs {
+		kfNames = append(kfNames, KnownFolderMarkers(d.Path)...)
+	}
+	for _, o := range cfg.Overlays {
+		kfNames = append(kfNames, KnownFolderMarkers(o.System)...)
+	}
+	b.WriteString(EmitKnownFolderDefs(kfNames))
+
 	fmt.Fprintf(&b, "$SERVICE_NAME = %s\n", psQuote(cfg.ServiceName))
 
 	if cfg.ServiceName != "" {
@@ -122,7 +134,7 @@ func GeneratePowerShellInstaller(cfg PowerShellConfig) (string, error) {
 	// Dirs
 	fmt.Fprintf(&b, "$DIRS_COUNT = %d\n", len(cfg.Dirs))
 	for i, d := range cfg.Dirs {
-		fmt.Fprintf(&b, "$DIR_%d_PATH = %s\n", i, psQuote(d.Path))
+		fmt.Fprintf(&b, "$DIR_%d_PATH = %s\n", i, EmitPathExpr(d.Path))
 		fmt.Fprintf(&b, "$DIR_%d_OWNER = %s\n", i, psQuote(d.Owner))
 		fmt.Fprintf(&b, "$DIR_%d_MODE = %s\n", i, psQuote(d.Mode))
 	}
@@ -130,7 +142,7 @@ func GeneratePowerShellInstaller(cfg PowerShellConfig) (string, error) {
 	// Overlays
 	fmt.Fprintf(&b, "$OVERLAY_COUNT = %d\n", len(cfg.Overlays))
 	for i, o := range cfg.Overlays {
-		fmt.Fprintf(&b, "$OVERLAY_%d_SYSTEM = %s\n", i, psQuote(o.System))
+		fmt.Fprintf(&b, "$OVERLAY_%d_SYSTEM = %s\n", i, EmitPathExpr(o.System))
 		fmt.Fprintf(&b, "$OVERLAY_%d_ITEM = %s\n", i, psQuote(o.Item))
 	}
 

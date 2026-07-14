@@ -182,3 +182,73 @@ func TestGeneratePowerShellInstallerArgsQuoting(t *testing.T) {
 		t.Error("output still uses naive $SERVICE_ARGS -join (would split args with spaces)")
 	}
 }
+
+func TestGeneratePowerShellInstallerKnownFolderDirs(t *testing.T) {
+	cfg := PowerShellConfig{
+		Name:         "myapp",
+		Version:      "v1.0.0",
+		Platform:     "windows-amd64",
+		ExpectedArch: "AMD64",
+		DefaultDir:   `C:\Program Files\myapp`,
+		ServiceName:  "",
+		Dirs: []DirSpec{
+			{Path: `{AppDataFolder}\MyApp\data`, Owner: "myapp", Mode: "0755"},
+		},
+	}
+	out, err := GeneratePowerShellInstaller(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "$AppDataFolder = [Environment]::GetFolderPath([Environment+SpecialFolder]::ApplicationData)") {
+		t.Error("missing $AppDataFolder runtime definition")
+	}
+	want := `$DIR_0_PATH = $AppDataFolder + '\MyApp\data'`
+	if !strings.Contains(out, want) {
+		t.Errorf("missing marked dir path expression %q", want)
+	}
+}
+
+func TestGeneratePowerShellInstallerKnownFolderOverlay(t *testing.T) {
+	cfg := PowerShellConfig{
+		Name:         "myapp",
+		Version:      "v1.0.0",
+		Platform:     "windows-amd64",
+		ExpectedArch: "AMD64",
+		DefaultDir:   `C:\Program Files\myapp`,
+		ServiceName:  "",
+		Overlays: []OverlaySpec{
+			{System: `{ProgramFiles64Folder}\OtherApp\config.json`, Item: "etc/config.txt"},
+		},
+	}
+	out, err := GeneratePowerShellInstaller(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "$ProgramFiles64Folder = [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)") {
+		t.Error("missing $ProgramFiles64Folder runtime definition")
+	}
+	want := `$OVERLAY_0_SYSTEM = $ProgramFiles64Folder + '\OtherApp\config.json'`
+	if !strings.Contains(out, want) {
+		t.Errorf("missing marked overlay system expression %q", want)
+	}
+}
+
+func TestGeneratePowerShellInstallerNoKnownFolderDefsWhenUnmarked(t *testing.T) {
+	cfg := PowerShellConfig{
+		Name:         "myapp",
+		Version:      "v1.0.0",
+		Platform:     "windows-amd64",
+		ExpectedArch: "AMD64",
+		DefaultDir:   `C:\Program Files\myapp`,
+		ServiceName:  "",
+		Dirs:         []DirSpec{{Path: `C:\var\log\myapp`, Mode: "0755"}},
+		Overlays:     []OverlaySpec{{System: `C:\etc\agent\config.txt`, Item: "etc/config.txt"}},
+	}
+	out, err := GeneratePowerShellInstaller(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "[Environment]::GetFolderPath") {
+		t.Error("unmarked config should emit no known-folder definitions")
+	}
+}

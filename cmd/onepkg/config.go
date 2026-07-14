@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	toml "github.com/pelletier/go-toml"
+
+	"onepkg/installer"
 )
 
 type Config struct {
@@ -246,6 +248,9 @@ func (c *Config) validateInstall(configDir string) error {
 		if strings.Contains(d.Path, "..") {
 			return fmt.Errorf("path traversal not allowed in dirs path %q", d.Path)
 		}
+		if err := installer.ValidateKnownFolderMarkers(d.Path); err != nil {
+			return err
+		}
 		cleanPath := filepath.Clean(d.Path)
 		if filepath.IsAbs(d.Path) && isCriticalPath(cleanPath) {
 			return fmt.Errorf("critical system path not allowed: %q", d.Path)
@@ -264,15 +269,26 @@ func (c *Config) validateInstall(configDir string) error {
 		if overlay.Item == "" {
 			return fmt.Errorf("overlay item is required")
 		}
-		if overlay.System == "" || !filepath.IsAbs(overlay.System) {
-			return fmt.Errorf("overlay system path %q must be an absolute path", overlay.System)
+		if overlay.System == "" {
+			return fmt.Errorf("overlay system path is required")
+		}
+		if err := installer.ValidateKnownFolderMarkers(overlay.System); err != nil {
+			return err
 		}
 		if strings.Contains(overlay.System, "..") {
 			return fmt.Errorf("path traversal not allowed in overlay system path %q", overlay.System)
 		}
-		cleanSys := filepath.Clean(overlay.System)
-		if isCriticalPath(cleanSys) {
-			return fmt.Errorf("critical system path not allowed in overlay: %q", overlay.System)
+		// A marked system path (e.g. {AppDataFolder}\...) is absolute on the target
+		// but cannot be Go-evaluated for absoluteness or critical-path safety, so
+		// those checks only apply to literal paths.
+		if !installer.HasKnownFolderMarker(overlay.System) {
+			if !filepath.IsAbs(overlay.System) {
+				return fmt.Errorf("overlay system path %q must be an absolute path", overlay.System)
+			}
+			cleanSys := filepath.Clean(overlay.System)
+			if isCriticalPath(cleanSys) {
+				return fmt.Errorf("critical system path not allowed in overlay: %q", overlay.System)
+			}
 		}
 		matched := false
 		for _, item := range c.Items {
@@ -319,6 +335,11 @@ func (c *Config) validateRun() error {
 			}
 			if !itemMatches(c.Items, cmd.Exec) {
 				return fmt.Errorf("command %d exec %q not found in items", i, cmd.Exec)
+			}
+		}
+		for _, a := range cmd.Args {
+			if err := installer.ValidateKnownFolderMarkers(a); err != nil {
+				return err
 			}
 		}
 	}

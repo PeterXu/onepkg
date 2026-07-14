@@ -45,6 +45,19 @@ func GeneratePowerShellRunner(cfg PowerShellRunnerConfig) (string, error) {
 	b.WriteString(powershellArchVars(cfg.ExpectedArch))
 	b.WriteString("\n")
 
+	// Windows known-folder definitions: only variables referenced by the
+	// commands (via $Name in shell or {Name} in args).
+	var kfNames []string
+	for _, cmd := range cfg.Commands {
+		if cmd.Shell != "" {
+			kfNames = append(kfNames, KnownFolderDollarVars(cmd.Shell)...)
+		}
+		for _, a := range cmd.Args {
+			kfNames = append(kfNames, KnownFolderMarkers(a)...)
+		}
+	}
+	b.WriteString(EmitKnownFolderDefs(kfNames))
+
 	if cfg.RequireAdmin {
 		b.WriteString(powershellCheckAdmin())
 	}
@@ -74,6 +87,17 @@ func GeneratePowerShellRunner(cfg PowerShellRunnerConfig) (string, error) {
 	return b.String(), nil
 }
 
+// argPS renders a command argument for inline PowerShell use. Bare values are
+// single-quoted (identical to psQuote); marked values become a parenthesized
+// concatenation so they are a single token in the log line and the invocation.
+func argPS(a string) string {
+	e := EmitPathExpr(a)
+	if strings.Contains(e, " + ") {
+		return "(" + e + ")"
+	}
+	return e
+}
+
 // runnerCommandBlock renders one command's log line, invocation, and fail-fast check.
 func runnerCommandBlock(cmd CommandSpec) string {
 	var b strings.Builder
@@ -82,14 +106,14 @@ func runnerCommandBlock(cmd CommandSpec) string {
 		b.WriteString("    Write-Host 'Running:'")
 		b.WriteString(" " + psQuote(cmd.Exec))
 		for _, a := range cmd.Args {
-			b.WriteString(" " + psQuote(a))
+			b.WriteString(" " + argPS(a))
 		}
 		b.WriteString("\n")
 
 		b.WriteString("    $LASTEXITCODE = 0\n")
 		b.WriteString("    & (Join-Path $PayloadDir " + psQuote(cmd.Exec) + ")")
 		for _, a := range cmd.Args {
-			b.WriteString(" " + psQuote(a))
+			b.WriteString(" " + argPS(a))
 		}
 		b.WriteString("\n")
 		b.WriteString("    if ((-not $?) -or ($LASTEXITCODE -ne 0)) { Write-Host ('Command failed with exit code ' + $LASTEXITCODE); Read-Host 'Press Enter to exit'; exit 1 }\n")

@@ -90,3 +90,44 @@ func TestGeneratePowerShellRunnerIsLean(t *testing.T) {
 		}
 	}
 }
+
+func TestGeneratePowerShellRunnerKnownFolders(t *testing.T) {
+	cfg := PowerShellRunnerConfig{
+		Name:         "kf",
+		Version:      "v1.0.0",
+		Platform:     "windows-amd64",
+		ExpectedArch: "AMD64",
+		Commands: []CommandSpec{
+			{Exec: "bin/app.exe", Args: []string{"--config", `{LocalAppDataFolder}\MyApp\cfg.json`}},
+			{Shell: `Copy-Item profile.json "$AppDataFolder\MyApp\"`},
+		},
+	}
+	out, err := GeneratePowerShellRunner(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "$AppDataFolder = [Environment]::GetFolderPath([Environment+SpecialFolder]::ApplicationData)") {
+		t.Error("missing $AppDataFolder def (referenced via $Var in shell)")
+	}
+	if !strings.Contains(out, "$LocalAppDataFolder = [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)") {
+		t.Error("missing $LocalAppDataFolder def (referenced via {Var} in args)")
+	}
+	// Marked arg rendered as a parenthesized concatenation in the invocation.
+	if !strings.Contains(out, "($LocalAppDataFolder + '\\MyApp\\cfg.json')") {
+		t.Errorf("missing marked arg expression in invocation; got:\n%s", out)
+	}
+}
+
+func TestGeneratePowerShellRunnerNoKnownFolderDefsWhenUnused(t *testing.T) {
+	cfg := PowerShellRunnerConfig{
+		Name: "x", Version: "v1", Platform: "windows-amd64", ExpectedArch: "AMD64",
+		Commands: []CommandSpec{{Shell: "Write-Host hi"}},
+	}
+	out, err := GeneratePowerShellRunner(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "[Environment]::GetFolderPath") {
+		t.Error("runner with no variable references should emit no known-folder definitions")
+	}
+}
