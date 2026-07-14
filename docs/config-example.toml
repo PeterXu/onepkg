@@ -171,9 +171,8 @@ recovery_delay_ms = 5000       # delay before restart on failure in ms (default:
 # host is macOS/Linux), so the target user's profile is used.
 #
 # Syntax:
-#   {VarName}  in path-string fields: dirs[].path, system_overlay[].system,
-#              and run-mode commands[].args
-#   $VarName   in run-mode commands[].shell (ordinary PowerShell variable)
+#   {dst.VarName}  in path-string fields: dirs[].path, system_overlay[].system,
+#                  and run-mode commands[].args AND commands[].shell
 #
 # Supported variables (MSI/WiX names):
 #   AppDataFolder         C:\Users\<u>\AppData\Roaming
@@ -195,18 +194,30 @@ recovery_delay_ms = 5000       # delay before restart on failure in ms (default:
 #
 # Install example - create a directory under the roaming AppData folder:
 # [[dirs]]
-# path = "{AppDataFolder}\\MyApp\\data"
+# path = "{dst.AppDataFolder}\\MyApp\\data"
 # mode = "0755"
 #
 # Install example - overlay a file from another installed app:
 # [[system_overlay]]
-# system = "{ProgramFiles64Folder}\\OtherApp\\config.json"
+# system = "{dst.ProgramFiles64Folder}\\OtherApp\\config.json"
 # item = "config/otherapp.json"
 #
-# Run example - pass a resolved path as an argument, and use $Var in shell:
+# Run example - pass a resolved path as an argument (same {dst.} form in shell):
 # [[commands]]
 # exec = "bin/myapp.exe"
-# args = ["--config", "{AppDataFolder}\\MyApp\\config.json"]
+# args = ["--config", "{dst.AppDataFolder}\\MyApp\\config.json"]
 #
 # [[commands]]
-# shell = "Copy-Item profile.json \"$AppDataFolder\\MyApp\\\""
+# shell = "Copy-Item profile.json \"{dst.AppDataFolder}\\MyApp\\\""
+
+# --- Host environment variables (build-time, all platforms) ---
+# {env.NAME} is replaced at BUILD time with the build host's value of the
+# environment variable NAME, in EVERY string field (name, version, paths,
+# args, etc.). It produces a literal in the packed config. A referenced
+# variable that is unset or empty fails the build (no defaults).
+#
+# This is distinct from {dst.NAME} (resolved on the Windows target at
+# install/run time) and from the legacy {platform} marker.
+#
+# version = "{env.BUILD_VERSION}"
+# output_dir = "{env.DIST_DIR}"
