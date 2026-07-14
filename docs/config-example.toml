@@ -135,3 +135,31 @@ recovery_delay_ms = 5000       # delay before restart on failure in ms (default:
 # [services.linux]
 # after = ["network.target", "myapp.service"]  # can depend on first service
 # restart_sec = 10
+
+# --- mode = "run": one-shot command/script package (Windows-only) ---
+# Double-clicking the .exe runs the commands once in order, then exits.
+# No install/uninstall, no service, no permanent files. Items are optional
+# (omit them for shell-only packages).
+# NOTE: run packages are interactive-only today - they wait on 'Read-Host' before exiting,
+# so they are not suited to scheduled/CI/unattended use (a future 'quiet'/'no_pause' option may change this).
+#
+# name = "cleanup-bundle"
+# version = "v1.0.0"
+# mode = "run"
+# require_admin = true
+#
+# items = [
+#   "bin/cleanup.{platform}",
+#   "scripts/setup.ps1",
+# ]
+#
+# [[commands]]
+# exec = "bin/cleanup"               # bundled file, resolved against the temp dir
+# args = ["--all", "--force"]
+#
+# [[commands]]
+# shell = "netsh advfirewall set allprofiles state off"   # arbitrary PowerShell
+#
+# [[commands]]
+# exec = "scripts/setup.ps1"
+# args = ["-Mode", "quick"]

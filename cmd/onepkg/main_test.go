@@ -463,3 +463,127 @@ func TestPlatformOutputPathWindows(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildForWindowsRunRejectsNonWindows(t *testing.T) {
+	cfg := &Config{Name: "x", Version: "v1", Mode: "run"}
+	err := BuildForPlatform(cfg, "linux-amd64", nil, nil, nil, "")
+	if err == nil {
+		t.Fatal("BuildForPlatform should reject mode=run on non-windows platform")
+	}
+	if !strings.Contains(err.Error(), "Windows-only") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestBuildForWindowsRunWithItems(t *testing.T) {
+	projectDir := t.TempDir()
+	binDir := filepath.Join(projectDir, "bin")
+	os.MkdirAll(binDir, 0755)
+	os.WriteFile(filepath.Join(binDir, "runapp.exe"), []byte("fake-exe"), 0755)
+
+	configContent := `
+name = "runapp"
+version = "v1.0.0"
+mode = "run"
+items = ["bin/runapp.exe"]
+
+[[commands]]
+exec = "bin/runapp.exe"
+args = ["--do-stuff"]
+
+[[commands]]
+shell = "Write-Host shell-cmd"
+`
+	configPath := filepath.Join(projectDir, "config.toml")
+	os.WriteFile(configPath, []byte(configContent), 0644)
+
+	cfg, err := ParseConfig(configPath)
+	if err != nil {
+		t.Fatalf("ParseConfig: %v", err)
+	}
+	cfg.ApplyDefaults()
+	if err := cfg.Validate(projectDir); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+
+	platform := "windows-amd64"
+	resolved, err := ResolveItems(projectDir, cfg.Items, platform)
+	if err != nil {
+		t.Fatalf("ResolveItems: %v", err)
+	}
+	entries, err := CollectFilesResolved(projectDir, resolved, cfg.Exclude)
+	if err != nil {
+		t.Fatalf("CollectFilesResolved: %v", err)
+	}
+
+	outputDir := filepath.Join(projectDir, "packages")
+	os.MkdirAll(outputDir, 0755)
+
+	if err := BuildForPlatform(cfg, platform, entries, nil, nil, outputDir); err != nil {
+		t.Fatalf("BuildForPlatform: %v", err)
+	}
+
+	exeFile := filepath.Join(outputDir, "runapp_v1.0.0_windows_amd64.exe")
+	data, err := os.ReadFile(exeFile)
+	if err != nil {
+		t.Fatalf("read exe: %v", err)
+	}
+	if data[0] != 'M' || data[1] != 'Z' {
+		t.Error("exe does not start with MZ")
+	}
+	if !bytes.HasSuffix(data, []byte("ONEPKG")) {
+		t.Error("exe does not end with ONEPKG magic")
+	}
+	// run.ps1 text is embedded verbatim in the exe bytes.
+	if !bytes.Contains(data, []byte("& (Join-Path $PayloadDir 'bin/runapp.exe')")) {
+		t.Error("exe missing exec command in embedded run.ps1")
+	}
+	if !bytes.Contains(data, []byte("Invoke-Expression 'Write-Host shell-cmd'")) {
+		t.Error("exe missing shell command in embedded run.ps1")
+	}
+	if bytes.Contains(data, []byte("New-Service")) {
+		t.Error("run exe should not contain service code")
+	}
+}
+
+func TestBuildForWindowsRunShellOnly(t *testing.T) {
+	projectDir := t.TempDir()
+	configContent := `
+name = "shellonly"
+version = "v1.0.0"
+mode = "run"
+
+[[commands]]
+shell = "Write-Host hello"
+`
+	configPath := filepath.Join(projectDir, "config.toml")
+	os.WriteFile(configPath, []byte(configContent), 0644)
+
+	cfg, err := ParseConfig(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.ApplyDefaults()
+	if err := cfg.Validate(projectDir); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+
+	outputDir := filepath.Join(projectDir, "packages")
+	os.MkdirAll(outputDir, 0755)
+
+	// Shell-only: no items -> empty entries.
+	if err := BuildForPlatform(cfg, "windows-amd64", nil, nil, nil, outputDir); err != nil {
+		t.Fatalf("BuildForPlatform: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(outputDir, "shellonly_v1.0.0_windows_amd64.exe"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasSuffix(data, []byte("ONEPKG")) {
+		t.Error("exe does not end with ONEPKG magic")
+	}
+	if bytes.Contains(data, []byte("Expand-Archive")) {
+		t.Error("shell-only run exe should not contain Expand-Archive")
+	}
+}

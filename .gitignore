@@ -1,3 +1,4 @@
 cmd/onepkg/onepkg
 cmd/onepkg/installer/stubs
+tmp/
 todo.md

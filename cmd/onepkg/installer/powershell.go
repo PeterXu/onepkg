@@ -32,6 +32,56 @@ func psQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
 
+// powershellArchVars emits the $EXPECTED_ARCH and $ALLOWED_ARCHS variable
+// block that CheckArch reads. An amd64 package also runs on arm64 Windows via
+// x64 emulation; an arm64 package only runs on arm64.
+func powershellArchVars(expectedArch string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "$EXPECTED_ARCH = %s\n", psQuote(expectedArch))
+	allowedArches := []string{expectedArch}
+	if expectedArch == "AMD64" {
+		allowedArches = append(allowedArches, "ARM64")
+	}
+	b.WriteString("$ALLOWED_ARCHS = @(")
+	for i, a := range allowedArches {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString(psQuote(a))
+	}
+	b.WriteString(")\n")
+	return b.String()
+}
+
+// powershellCheckAdmin emits the CheckAdmin function (admin-gate check; does not elevate).
+func powershellCheckAdmin() string {
+	return `function CheckAdmin {
+    $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = [Security.Principal.WindowsPrincipal]$currentUser
+    $isAdmin = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    if (-not $isAdmin) {
+        Write-Error "This script requires administrator privileges."
+        Write-Host "Re-run from an elevated PowerShell prompt."
+        exit 1
+    }
+}
+
+`
+}
+
+// powershellCheckArch emits the CheckArch function (references $EXPECTED_ARCH / $ALLOWED_ARCHS).
+func powershellCheckArch() string {
+	return `function CheckArch {
+    $arch = $env:PROCESSOR_ARCHITECTURE
+    if ($ALLOWED_ARCHS -notcontains $arch) {
+        Write-Error "Error: This package is for $EXPECTED_ARCH (supported: $($ALLOWED_ARCHS -join ', ')), current system is $arch"
+        exit 1
+    }
+}
+
+`
+}
+
 func GeneratePowerShellInstaller(cfg PowerShellConfig) (string, error) {
 	var b strings.Builder
 
@@ -51,22 +101,7 @@ func GeneratePowerShellInstaller(cfg PowerShellConfig) (string, error) {
 	fmt.Fprintf(&b, "$PKG_NAME = %s\n", psQuote(cfg.Name))
 	fmt.Fprintf(&b, "$PKG_VERSION = %s\n", psQuote(cfg.Version))
 	fmt.Fprintf(&b, "$PKG_PLATFORM = %s\n", psQuote(cfg.Platform))
-	fmt.Fprintf(&b, "$EXPECTED_ARCH = %s\n", psQuote(cfg.ExpectedArch))
-	// An amd64 package also runs on arm64 Windows via x64 emulation; an arm64
-	// package only runs on arm64 (x64 cannot emulate arm64). CheckArch accepts
-	// any arch in this list rather than requiring an exact match.
-	allowedArches := []string{cfg.ExpectedArch}
-	if cfg.ExpectedArch == "AMD64" {
-		allowedArches = append(allowedArches, "ARM64")
-	}
-	b.WriteString("$ALLOWED_ARCHS = @(")
-	for i, a := range allowedArches {
-		if i > 0 {
-			b.WriteString(", ")
-		}
-		b.WriteString(psQuote(a))
-	}
-	b.WriteString(")\n")
+	b.WriteString(powershellArchVars(cfg.ExpectedArch))
 	fmt.Fprintf(&b, "$DEFAULT_DIR = %s\n", psQuote(cfg.DefaultDir))
 	fmt.Fprintf(&b, "$SERVICE_NAME = %s\n", psQuote(cfg.ServiceName))
 
@@ -114,26 +149,8 @@ func powershellFunctions(cfg PowerShellConfig) string {
 	hasService := cfg.ServiceName != ""
 	var b strings.Builder
 
-	b.WriteString(`function CheckAdmin {
-    $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent()
-    $principal = [Security.Principal.WindowsPrincipal]$currentUser
-    $isAdmin = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-    if (-not $isAdmin) {
-        Write-Error "This script requires administrator privileges."
-        Write-Host "Run with: PowerShell -ExecutionPolicy Bypass -File ` + "`" + `"$PSCommandPath` + "`" + `" -Action install"
-        exit 1
-    }
-}
-
-function CheckArch {
-    $arch = $env:PROCESSOR_ARCHITECTURE
-    if ($ALLOWED_ARCHS -notcontains $arch) {
-        Write-Error "Error: This package is for $EXPECTED_ARCH (supported: $($ALLOWED_ARCHS -join ', ')), current system is $arch"
-        exit 1
-    }
-}
-
-`)
+	b.WriteString(powershellCheckAdmin())
+	b.WriteString(powershellCheckArch())
 
 	if hasService {
 		b.WriteString(`function InstallService {

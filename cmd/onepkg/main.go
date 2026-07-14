@@ -197,6 +197,10 @@ func BuildForPlatform(cfg *Config, platform string, entries []FileEntry, tarData
 	goos := parts[0]
 	arch := parts[1]
 
+	if cfg.Mode == "run" && goos != "windows" {
+		return fmt.Errorf("mode=\"run\" is Windows-only; got platform %q", platform)
+	}
+
 	versionContent, err := GenerateVersion(VersionInfo{
 		Name:     cfg.Name,
 		Version:  cfg.Version,
@@ -322,6 +326,9 @@ func BuildForPlatform(cfg *Config, platform string, entries []FileEntry, tarData
 }
 
 func BuildForWindows(cfg *Config, platform string, entries []FileEntry, shaMap map[string]string, outputDir string) error {
+	if cfg.Mode == "run" {
+		return BuildForWindowsRun(cfg, platform, entries, outputDir)
+	}
 	parts := strings.SplitN(platform, "-", 2)
 	arch := parts[1]
 
@@ -401,6 +408,56 @@ func BuildForWindows(cfg *Config, platform string, entries []FileEntry, shaMap m
 	}
 
 	// Generate self-extracting exe
+	exeData, err := installer.GenerateExeWrapper(installer.ExeWrapperConfig{
+		Name:          cfg.Name,
+		Version:       cfg.Version,
+		Platform:      platform,
+		InstallScript: ps1Content,
+		PayloadZip:    payloadZip,
+	})
+	if err != nil {
+		return fmt.Errorf("generate exe wrapper: %w", err)
+	}
+
+	outputPath := platformOutputPath(cfg, platform, outputDir)
+	return os.WriteFile(outputPath, exeData, 0755)
+}
+
+// BuildForWindowsRun builds a mode="run" self-extracting Windows exe: a payload
+// zip (no VERSION file), a lean run.ps1, wrapped via the existing exe-wrapper.
+// The stub is unchanged; run.ps1 tolerates the -InstallDir/-Action it forwards.
+func BuildForWindowsRun(cfg *Config, platform string, entries []FileEntry, outputDir string) error {
+	parts := strings.SplitN(platform, "-", 2)
+	arch := parts[1]
+
+	// No VERSION file: run mode has no verify action. Empty zip when no entries.
+	payloadZip, err := BuildZipWithExtras(entries, *cfg.PreservePermissions, nil)
+	if err != nil {
+		return fmt.Errorf("build zip: %w", err)
+	}
+
+	commands := make([]installer.CommandSpec, 0, len(cfg.Commands))
+	for _, c := range cfg.Commands {
+		commands = append(commands, installer.CommandSpec{
+			Exec:  c.Exec,
+			Args:  c.Args,
+			Shell: c.Shell,
+		})
+	}
+
+	ps1Content, err := installer.GeneratePowerShellRunner(installer.PowerShellRunnerConfig{
+		Name:         cfg.Name,
+		Version:      cfg.Version,
+		Platform:     platform,
+		ExpectedArch: unameArch("windows", arch),
+		RequireAdmin: cfg.RequireAdmin,
+		HasPayload:   len(entries) > 0,
+		Commands:     commands,
+	})
+	if err != nil {
+		return fmt.Errorf("generate powershell runner: %w", err)
+	}
+
 	exeData, err := installer.GenerateExeWrapper(installer.ExeWrapperConfig{
 		Name:          cfg.Name,
 		Version:       cfg.Version,

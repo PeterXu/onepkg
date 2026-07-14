@@ -400,9 +400,9 @@ func TestValidatePlatformMarker(t *testing.T) {
 		{
 			name: "service exec matches stripped platform marker",
 			cfg: &Config{
-				Name:    "myapp",
-				Version: "v1.0.0",
-				Items:   []string{"bin/myapp.{platform}"},
+				Name:     "myapp",
+				Version:  "v1.0.0",
+				Items:    []string{"bin/myapp.{platform}"},
 				Services: []ServiceConfig{{Name: "myapp", Exec: "bin/myapp"}},
 			},
 			wantErr: "", // Exec "bin/myapp" matches stripped marker
@@ -410,9 +410,9 @@ func TestValidatePlatformMarker(t *testing.T) {
 		{
 			name: "service exec does not match stripped marker",
 			cfg: &Config{
-				Name:    "myapp",
-				Version: "v1.0.0",
-				Items:   []string{"bin/myapp.{platform}"},
+				Name:     "myapp",
+				Version:  "v1.0.0",
+				Items:    []string{"bin/myapp.{platform}"},
 				Services: []ServiceConfig{{Name: "myapp", Exec: "bin/other"}},
 			},
 			wantErr: "service exec \"bin/other\" not found in items",
@@ -445,9 +445,9 @@ func TestServiceExecPlatformMarkerRejected(t *testing.T) {
 	}
 
 	cfg := &Config{
-		Name:    "myapp",
-		Version: "v1.0.0",
-		Items:   []string{"bin/myapp.{platform}"},
+		Name:     "myapp",
+		Version:  "v1.0.0",
+		Items:    []string{"bin/myapp.{platform}"},
 		Services: []ServiceConfig{{Name: "myapp", Exec: "bin/myapp.{platform}"}},
 	}
 
@@ -1076,8 +1076,8 @@ func TestApplyDefaultsDirs(t *testing.T) {
 			name: "defaults from service user",
 			cfg: &Config{
 				Name: "myapp", Version: "v1.0.0",
-				Items: []string{"bin/myapp"},
-				Dirs:  []DirConfig{{Path: "/var/log/myapp"}},
+				Items:    []string{"bin/myapp"},
+				Dirs:     []DirConfig{{Path: "/var/log/myapp"}},
 				Services: []ServiceConfig{{Name: "myapp", User: "appuser"}},
 			},
 			wantPath:  "/var/log/myapp",
@@ -1101,8 +1101,8 @@ func TestApplyDefaultsDirs(t *testing.T) {
 			name: "explicit owner preserved",
 			cfg: &Config{
 				Name: "myapp", Version: "v1.0.0",
-				Items: []string{"bin/myapp"},
-				Dirs:  []DirConfig{{Path: "/var/log/myapp", Owner: "loguser"}},
+				Items:    []string{"bin/myapp"},
+				Dirs:     []DirConfig{{Path: "/var/log/myapp", Owner: "loguser"}},
 				Services: []ServiceConfig{{Name: "myapp", User: "appuser"}},
 			},
 			wantPath:  "/var/log/myapp",
@@ -1482,5 +1482,238 @@ func TestValidateWindowsServiceStartType(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestParseConfigRunMode(t *testing.T) {
+	dir := t.TempDir()
+	configContent := `
+name = "cleanup"
+version = "v1.0.0"
+mode = "run"
+require_admin = true
+
+[[commands]]
+exec = "bin/cleanup"
+args = ["--all", "--force"]
+
+[[commands]]
+shell = "netsh advfirewall set allprofiles state off"
+`
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path, []byte(configContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := ParseConfig(path)
+	if err != nil {
+		t.Fatalf("ParseConfig: %v", err)
+	}
+	if cfg.Mode != "run" {
+		t.Errorf("Mode = %q, want %q", cfg.Mode, "run")
+	}
+	if !cfg.RequireAdmin {
+		t.Error("RequireAdmin = false, want true")
+	}
+	if len(cfg.Commands) != 2 {
+		t.Fatalf("len(Commands) = %d, want 2", len(cfg.Commands))
+	}
+	if cfg.Commands[0].Exec != "bin/cleanup" {
+		t.Errorf("Commands[0].Exec = %q, want %q", cfg.Commands[0].Exec, "bin/cleanup")
+	}
+	if len(cfg.Commands[0].Args) != 2 || cfg.Commands[0].Args[0] != "--all" || cfg.Commands[0].Args[1] != "--force" {
+		t.Errorf("Commands[0].Args = %v, want [--all --force]", cfg.Commands[0].Args)
+	}
+	if cfg.Commands[0].Shell != "" {
+		t.Errorf("Commands[0].Shell = %q, want empty", cfg.Commands[0].Shell)
+	}
+	if cfg.Commands[1].Shell != "netsh advfirewall set allprofiles state off" {
+		t.Errorf("Commands[1].Shell = %q", cfg.Commands[1].Shell)
+	}
+	if cfg.Commands[1].Exec != "" {
+		t.Errorf("Commands[1].Exec = %q, want empty", cfg.Commands[1].Exec)
+	}
+}
+
+func TestApplyDefaultsMode(t *testing.T) {
+	cfg := &Config{}
+	cfg.ApplyDefaults()
+	if cfg.Mode != "install" {
+		t.Errorf("default Mode = %q, want %q", cfg.Mode, "install")
+	}
+
+	cfg2 := &Config{Mode: "run"}
+	cfg2.ApplyDefaults()
+	if cfg2.Mode != "run" {
+		t.Errorf("Mode = %q, want %q", cfg2.Mode, "run")
+	}
+}
+
+// writeRunConfig writes a mode="run" config (plus a real bin/cleanup item) into a
+// temp dir, appending extra TOML body. Returns parsed config and the dir.
+func writeRunConfig(t *testing.T, body string) (*Config, string) {
+	t.Helper()
+	dir := t.TempDir()
+	binDir := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(binDir, "cleanup"), []byte("exe"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	full := "name = \"cleanup\"\nversion = \"v1.0.0\"\nmode = \"run\"\n" + body
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path, []byte(full), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := ParseConfig(path)
+	if err != nil {
+		t.Fatalf("ParseConfig: %v", err)
+	}
+	cfg.ApplyDefaults()
+	return cfg, dir
+}
+
+func TestValidateRunModeValid(t *testing.T) {
+	cfg, dir := writeRunConfig(t, `
+items = ["bin/cleanup"]
+
+[[commands]]
+exec = "bin/cleanup"
+args = ["--all"]
+
+[[commands]]
+shell = "Write-Host hello"
+`)
+	if err := cfg.Validate(dir); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+}
+
+func TestValidateRunModeShellOnlyNoItems(t *testing.T) {
+	cfg, dir := writeRunConfig(t, `
+[[commands]]
+shell = "Write-Host hello"
+`)
+	if err := cfg.Validate(dir); err != nil {
+		t.Fatalf("Validate (shell-only, no items): %v", err)
+	}
+}
+
+func TestValidateRunModeRejectsServicesDirsOverlay(t *testing.T) {
+	cases := []struct{ name, body string }{
+		{"services", "items = [\"bin/cleanup\"]\n[[commands]]\nexec = \"bin/cleanup\"\n[[services]]\nname = \"x\"\nexec = \"bin/cleanup\"\n"},
+		{"dirs", "[[commands]]\nshell = \"x\"\n[[dirs]]\npath = \"/etc/x\"\n"},
+		{"overlay", "[[commands]]\nshell = \"x\"\n[[system_overlay]]\nsystem = \"/etc/x\"\nitem = \"bin/cleanup\"\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, dir := writeRunConfig(t, tc.body)
+			if err := cfg.Validate(dir); err == nil {
+				t.Errorf("Validate should reject %s in run mode", tc.name)
+			}
+		})
+	}
+}
+
+func TestValidateRunModeRequiresCommands(t *testing.T) {
+	cfg, dir := writeRunConfig(t, `items = ["bin/cleanup"]`+"\n")
+	if err := cfg.Validate(dir); err == nil {
+		t.Error("Validate should reject run mode with no commands")
+	}
+}
+
+func TestValidateRunModeCommandShape(t *testing.T) {
+	cases := []struct{ name, body string }{
+		{"both", "items = [\"bin/cleanup\"]\n[[commands]]\nexec = \"bin/cleanup\"\nshell = \"x\"\n"},
+		{"neither", "[[commands]]\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, dir := writeRunConfig(t, tc.body)
+			if err := cfg.Validate(dir); err == nil {
+				t.Errorf("Validate should reject command with %s set", tc.name)
+			}
+		})
+	}
+}
+
+func TestValidateRunModeExecMustMatchItem(t *testing.T) {
+	// exec references a file that is not a bundled item
+	cfg, dir := writeRunConfig(t, `
+items = ["bin/cleanup"]
+
+[[commands]]
+exec = "bin/other"
+`)
+	if err := cfg.Validate(dir); err == nil {
+		t.Error("Validate should reject exec that does not match an item")
+	}
+}
+
+func TestValidateRunModeExecRejectsPlatformMarker(t *testing.T) {
+	cfg, dir := writeRunConfig(t, `
+items = ["bin/cleanup.{platform}"]
+
+[[commands]]
+exec = "bin/cleanup.{platform}"
+`)
+	if err := cfg.Validate(dir); err == nil {
+		t.Error("Validate should reject {platform} marker in command exec (use stripped form)")
+	}
+}
+
+func TestValidateRunModeExecStrippedPlatformMatches(t *testing.T) {
+	cfg, dir := writeRunConfig(t, `
+items = ["bin/cleanup.{platform}"]
+
+[[commands]]
+exec = "bin/cleanup"
+`)
+	if err := cfg.Validate(dir); err != nil {
+		t.Errorf("stripped-form exec should match a {platform} item: %v", err)
+	}
+}
+
+func TestValidateInstallModeRejectsCommands(t *testing.T) {
+	dir := t.TempDir()
+	binDir := filepath.Join(dir, "bin")
+	os.MkdirAll(binDir, 0755)
+	os.WriteFile(filepath.Join(binDir, "app"), []byte("exe"), 0755)
+	full := `
+name = "app"
+version = "v1.0.0"
+mode = "install"
+items = ["bin/app"]
+
+[[commands]]
+shell = "Write-Host hi"
+`
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path, []byte(full), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := ParseConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.ApplyDefaults()
+	if err := cfg.Validate(dir); err == nil {
+		t.Error("Validate should reject [[commands]] in install mode")
+	}
+}
+
+func TestValidateBadMode(t *testing.T) {
+	dir := t.TempDir()
+	full := "name = \"x\"\nversion = \"v1\"\nmode = \"bogus\"\nitems = [\"bin/x\"]\n"
+	path := filepath.Join(dir, "config.toml")
+	os.WriteFile(path, []byte(full), 0644)
+	cfg, err := ParseConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.ApplyDefaults()
+	if err := cfg.Validate(dir); err == nil {
+		t.Error("Validate should reject unknown mode")
 	}
 }

@@ -10,26 +10,37 @@ import (
 )
 
 type Config struct {
-	Name               string          `toml:"name"`
-	Version            string          `toml:"version"`
-	Platforms          []string        `toml:"platforms"`
-	OutputDir          string          `toml:"output_dir"`
-	PreservePermissions *bool          `toml:"preserve_permissions"` // nil = default true
-	Exclude            []string        `toml:"exclude"`              // patterns to exclude from package
-	Items              []string        `toml:"items"`
-	Dirs               []DirConfig     `toml:"dirs"`
-	SystemOverlay      []OverlayConfig `toml:"system_overlay"`
-	Services           []ServiceConfig `toml:"services"`
+	Name                string          `toml:"name"`
+	Version             string          `toml:"version"`
+	Platforms           []string        `toml:"platforms"`
+	OutputDir           string          `toml:"output_dir"`
+	PreservePermissions *bool           `toml:"preserve_permissions"` // nil = default true
+	Exclude             []string        `toml:"exclude"`              // patterns to exclude from package
+	Items               []string        `toml:"items"`
+	Dirs                []DirConfig     `toml:"dirs"`
+	SystemOverlay       []OverlayConfig `toml:"system_overlay"`
+	Services            []ServiceConfig `toml:"services"`
+	Mode                string          `toml:"mode"` // "install" (default) | "run"
+	Commands            []CommandConfig `toml:"commands"`
+	RequireAdmin        bool            `toml:"require_admin"` // run mode only; default false (zero value)
+}
+
+// CommandConfig is one entry in [[commands]] for mode = "run" packages.
+// Exactly one of Exec or Shell must be set.
+type CommandConfig struct {
+	Exec  string   `toml:"exec"`  // bundled file path, resolved against the temp extraction dir; empty if Shell set
+	Args  []string `toml:"args"`  // args for Exec
+	Shell string   `toml:"shell"` // arbitrary PowerShell expression; empty if Exec set
 }
 
 type ServiceConfig struct {
-	Name    string        `toml:"name"`
-	Exec    string        `toml:"exec"`
-	Args    []string      `toml:"args"`
-	Restart string        `toml:"restart"`
-	User    string        `toml:"user"`
-	Linux   LinuxService  `toml:"linux"`
-	MacOS   MacOSService  `toml:"macos"`
+	Name    string         `toml:"name"`
+	Exec    string         `toml:"exec"`
+	Args    []string       `toml:"args"`
+	Restart string         `toml:"restart"`
+	User    string         `toml:"user"`
+	Linux   LinuxService   `toml:"linux"`
+	MacOS   MacOSService   `toml:"macos"`
 	Windows WindowsService `toml:"windows"`
 }
 
@@ -80,6 +91,9 @@ func ParseConfig(path string) (*Config, error) {
 }
 
 func (c *Config) ApplyDefaults() {
+	if c.Mode == "" {
+		c.Mode = "install"
+	}
 	if c.OutputDir == "" {
 		c.OutputDir = "packages"
 	}
@@ -140,9 +154,19 @@ func (c *Config) Validate(configDir string) error {
 	if c.Version == "" {
 		return fmt.Errorf("version is required")
 	}
-	if len(c.Items) == 0 {
-		return fmt.Errorf("at least one item is required")
+
+	mode := c.Mode
+	if mode == "" {
+		mode = "install"
 	}
+	switch mode {
+	case "install", "run":
+		// valid
+	default:
+		return fmt.Errorf("mode %q must be \"install\" or \"run\"", c.Mode)
+	}
+
+	// Item existence / traversal checks apply to items present in either mode.
 	for _, item := range c.Items {
 		if filepath.IsAbs(item) {
 			return fmt.Errorf("absolute path not allowed in item %q", item)
@@ -159,7 +183,23 @@ func (c *Config) Validate(configDir string) error {
 			}
 		}
 	}
-	// Service validation
+
+	if mode == "run" {
+		return c.validateRun()
+	}
+	return c.validateInstall(configDir)
+}
+
+// validateInstall holds the install-mode rules: items required, [[commands]]
+// rejected, plus service/dirs/overlay checks (unchanged from pre-run-mode behavior).
+func (c *Config) validateInstall(configDir string) error {
+	if len(c.Items) == 0 {
+		return fmt.Errorf("at least one item is required")
+	}
+	if len(c.Commands) > 0 {
+		return fmt.Errorf("[[commands]] is only allowed in mode = \"run\"")
+	}
+
 	itemSet := make(map[string]bool, len(c.Items))
 	for _, item := range c.Items {
 		itemSet[item] = true
@@ -168,13 +208,10 @@ func (c *Config) Validate(configDir string) error {
 		if svc.Name != "" && !isValidName(svc.Name) {
 			return fmt.Errorf("service name %q must contain only alphanumeric characters, hyphens, and underscores", svc.Name)
 		}
-		// Service exec must not contain {platform} marker - use stripped path
 		if svc.Exec != "" && HasPlatformMarker(svc.Exec) {
 			return fmt.Errorf("service exec %q should not contain {platform} marker (use stripped path, e.g., \"bin/myapp\")", svc.Exec)
 		}
-		// Service exec validation needs to handle {platform} markers in items
 		if svc.Exec != "" && !itemSet[svc.Exec] {
-			// Check if exec matches a platform-marked item (stripped form)
 			matched := false
 			for _, item := range c.Items {
 				if HasPlatformMarker(item) {
@@ -191,11 +228,9 @@ func (c *Config) Validate(configDir string) error {
 				return fmt.Errorf("service exec %q not found in items", svc.Exec)
 			}
 		}
-		// Windows service validation
 		if svc.Windows.StartType != "" {
 			switch svc.Windows.StartType {
 			case "auto", "manual", "disabled":
-				// valid
 			default:
 				return fmt.Errorf("service windows start_type %q must be one of: auto, manual, disabled", svc.Windows.StartType)
 			}
@@ -204,25 +239,20 @@ func (c *Config) Validate(configDir string) error {
 			return fmt.Errorf("service windows recovery_delay_ms must be >= 0")
 		}
 	}
-	// Dirs validation
 	for _, d := range c.Dirs {
 		if d.Path == "" {
 			return fmt.Errorf("dirs path is required")
 		}
-		// Check path traversal - look for ".." in original path before cleaning
 		if strings.Contains(d.Path, "..") {
 			return fmt.Errorf("path traversal not allowed in dirs path %q", d.Path)
 		}
 		cleanPath := filepath.Clean(d.Path)
-		// Check critical system paths (only for absolute paths)
 		if filepath.IsAbs(d.Path) && isCriticalPath(cleanPath) {
 			return fmt.Errorf("critical system path not allowed: %q", d.Path)
 		}
-		// Validate mode if specified
 		if d.Mode != "" && !isValidMode(d.Mode) {
 			return fmt.Errorf("invalid mode %q for dirs path %q (must be octal like 0755)", d.Mode, d.Path)
 		}
-		// Validate owner/group if specified
 		if d.Owner != "" && !isValidName(d.Owner) {
 			return fmt.Errorf("invalid owner %q for dirs path %q", d.Owner, d.Path)
 		}
@@ -230,7 +260,6 @@ func (c *Config) Validate(configDir string) error {
 			return fmt.Errorf("invalid group %q for dirs path %q", d.Group, d.Path)
 		}
 	}
-	// System overlay validation
 	for _, overlay := range c.SystemOverlay {
 		if overlay.Item == "" {
 			return fmt.Errorf("overlay item is required")
@@ -245,7 +274,6 @@ func (c *Config) Validate(configDir string) error {
 		if isCriticalPath(cleanSys) {
 			return fmt.Errorf("critical system path not allowed in overlay: %q", overlay.System)
 		}
-		// Check overlay.Item matches an entry in items
 		matched := false
 		for _, item := range c.Items {
 			if overlay.Item == item {
@@ -259,6 +287,39 @@ func (c *Config) Validate(configDir string) error {
 		}
 		if !matched {
 			return fmt.Errorf("overlay item %q not found in items", overlay.Item)
+		}
+	}
+	return nil
+}
+
+// validateRun holds the run-mode rules: install artifacts rejected, commands
+// required and well-formed, command exec must reference a bundled item.
+func (c *Config) validateRun() error {
+	if len(c.Services) > 0 {
+		return fmt.Errorf("[[services]] is not allowed in mode = \"run\"")
+	}
+	if len(c.Dirs) > 0 {
+		return fmt.Errorf("[[dirs]] is not allowed in mode = \"run\"")
+	}
+	if len(c.SystemOverlay) > 0 {
+		return fmt.Errorf("[[system_overlay]] is not allowed in mode = \"run\"")
+	}
+	if len(c.Commands) == 0 {
+		return fmt.Errorf("mode = \"run\" requires at least one [[commands]] entry")
+	}
+	for i, cmd := range c.Commands {
+		hasExec := cmd.Exec != ""
+		hasShell := cmd.Shell != ""
+		if hasExec == hasShell {
+			return fmt.Errorf("command %d must set exactly one of exec or shell", i)
+		}
+		if hasExec {
+			if HasPlatformMarker(cmd.Exec) {
+				return fmt.Errorf("command %d exec %q should not contain {platform} marker (use stripped path)", i, cmd.Exec)
+			}
+			if !itemMatches(c.Items, cmd.Exec) {
+				return fmt.Errorf("command %d exec %q not found in items", i, cmd.Exec)
+			}
 		}
 	}
 	return nil
@@ -331,4 +392,19 @@ func ResolvePlatformItem(item, platform string) string {
 // StripPlatformMarker removes .{platform} from the item path
 func StripPlatformMarker(item string) string {
 	return strings.ReplaceAll(item, "."+PlatformMarker, "")
+}
+
+// itemMatches reports whether exec names a bundled item, by exact match or by the
+// stripped {platform} form (e.g. "bin/cleanup" matches item "bin/cleanup.{platform}").
+// It deliberately does NOT use service-exec's looser prefix match (config.go Validate).
+func itemMatches(items []string, exec string) bool {
+	for _, item := range items {
+		if item == exec {
+			return true
+		}
+		if HasPlatformMarker(item) && StripPlatformMarker(item) == exec {
+			return true
+		}
+	}
+	return false
 }
