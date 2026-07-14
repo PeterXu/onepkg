@@ -141,6 +141,12 @@ func TestGeneratePowerShellRunnerKnownFolders(t *testing.T) {
 	if !strings.Contains(out, wantShell) {
 		t.Errorf("shell marker not rewritten to $Var; want %q, got:\n%s", wantShell, out)
 	}
+	// Dialog label for the exec command must resolve {dst.*} args to the PowerShell
+	// variable (so the MessageBox shows the actual path), matching the invocation.
+	wantLabel := `$results += '[OK]  ' + ('bin/app.exe' + ' ' + '--config' + ' ' + ($LocalAppDataFolder + '\MyApp\cfg.json'))`
+	if !strings.Contains(out, wantLabel) {
+		t.Errorf("dialog label must resolve {dst.*} args; want %q\ngot:\n%s", wantLabel, out)
+	}
 }
 
 func TestGeneratePowerShellRunnerNoKnownFolderDefsWhenUnused(t *testing.T) {

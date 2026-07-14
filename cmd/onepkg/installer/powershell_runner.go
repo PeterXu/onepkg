@@ -113,14 +113,21 @@ func argPS(a string) string {
 	return e
 }
 
-// commandLabel returns the human-readable form of a command for the results
-// dialog: exec plus its args space-joined, or the shell expression.
-func commandLabel(cmd CommandSpec) string {
+// commandLabelExpr returns a PowerShell expression that evaluates to the
+// human-readable form of a command for the results dialog. It reuses the same
+// arg rendering as the invocation (argPS for exec args, ReplaceMarkers for
+// shell) so {dst.*} variables resolve to the target path in the MessageBox
+// rather than showing the raw {dst.*} marker. ({env.NAME} is already baked to a
+// literal at build time, so it resolves too.)
+func commandLabelExpr(cmd CommandSpec) string {
 	if cmd.Exec != "" {
-		parts := append([]string{cmd.Exec}, cmd.Args...)
-		return strings.Join(parts, " ")
+		expr := psQuote(cmd.Exec)
+		for _, a := range cmd.Args {
+			expr += " + ' ' + " + argPS(a)
+		}
+		return expr
 	}
-	return cmd.Shell
+	return psQuote(ReplaceMarkers(cmd.Shell))
 }
 
 // runnerCommandBlock renders one command's real-time log line, invocation, and
@@ -128,7 +135,7 @@ func commandLabel(cmd CommandSpec) string {
 // and bumps $failures instead of aborting.
 func runnerCommandBlock(cmd CommandSpec) string {
 	var b strings.Builder
-	label := psQuote(commandLabel(cmd))
+	label := commandLabelExpr(cmd)
 	if cmd.Exec != "" {
 		// Log: Write-Host 'Running:' '<exec>' '<arg>' ...  (all single-quoted via psQuote)
 		b.WriteString("    Write-Host 'Running:'")
@@ -152,10 +159,10 @@ func runnerCommandBlock(cmd CommandSpec) string {
 	// Record result (run-all, no fail-fast). Exit code is shown only when non-zero,
 	// so a failed cmdlet (which leaves $LASTEXITCODE at 0) does not read "(exit 0)".
 	b.WriteString("    if ((-not $?) -or ($LASTEXITCODE -ne 0)) {\n")
-	b.WriteString("        $results += '[FAIL] ' + " + label + " + $(if ($LASTEXITCODE -ne 0) { ' (exit ' + $LASTEXITCODE + ')' })\n")
+	b.WriteString("        $results += '[FAIL] ' + (" + label + ") + $(if ($LASTEXITCODE -ne 0) { ' (exit ' + $LASTEXITCODE + ')' })\n")
 	b.WriteString("        $failures++\n")
 	b.WriteString("    } else {\n")
-	b.WriteString("        $results += '[OK]  ' + " + label + "\n")
+	b.WriteString("        $results += '[OK]  ' + (" + label + ")\n")
 	b.WriteString("    }\n")
 	return b.String()
 }
