@@ -537,6 +537,7 @@ Options:
 Supported platforms:
   linux-amd64, linux-arm64
   darwin-amd64, darwin-arm64
+  windows-amd64, windows-arm64
 
 Item syntax:
   Items can use {platform} marker for platform-specific files:
@@ -548,6 +549,7 @@ Examples:
   onepkg -c config.toml --platform linux-arm64
   onepkg -c config.toml --platform linux-arm64,linux-amd64
   onepkg -c config.toml --platform darwin-arm64 --output ./dist
+  onepkg -c config.toml --platform windows-amd64
   onepkg toml-update version "1.0.1" config.toml
   onepkg toml-update --add newkey "value" config.toml
   onepkg json-update version "1.0.1" package.json
