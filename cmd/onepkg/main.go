@@ -126,15 +126,9 @@ func main() {
 	}
 
 	for _, platform := range platforms {
-		resolved, err := ResolveItems(configDir, cfg.Items, platform)
+		entries, err := ResolveItemsForPlatform(configDir, cfg, platform)
 		if err != nil {
 			fmt.Printf("Error resolving items for %s: %v\n", platform, err)
-			os.Exit(1)
-		}
-
-		entries, err := CollectFilesResolved(configDir, resolved, cfg.Exclude)
-		if err != nil {
-			fmt.Printf("Error collecting files for %s: %v\n", platform, err)
 			os.Exit(1)
 		}
 
@@ -395,7 +389,9 @@ func BuildForWindows(cfg *Config, platform string, entries []FileEntry, shaMap m
 			// Exec is kept relative; install.ps1 resolves it against $InstallDir at
 			// install time so a custom -InstallDir is reflected in the service binPath
 			// (matching how the .sh installer rewrites DEFAULT_DIR -> install_dir).
-			Exec: svc.Exec,
+			// resolveWindowsItemPath maps the config exec to its packed path, so an
+			// extensionless {platform} item packed as .exe on Windows is addressed.
+			Exec: resolveWindowsItemPath(entries, svc.Exec),
 			Args: svc.Args,
 		}
 	}
@@ -416,7 +412,7 @@ func BuildForWindows(cfg *Config, platform string, entries []FileEntry, shaMap m
 	for _, o := range cfg.SystemOverlay {
 		overlays = append(overlays, installer.OverlaySpec{
 			System: o.System,
-			Item:   o.Item,
+			Item:   resolveWindowsItemPath(entries, o.Item),
 		})
 	}
 
@@ -468,7 +464,7 @@ func BuildForWindowsRun(cfg *Config, platform string, entries []FileEntry, outpu
 	commands := make([]installer.CommandSpec, 0, len(cfg.Commands))
 	for _, c := range cfg.Commands {
 		commands = append(commands, installer.CommandSpec{
-			Exec:  c.Exec,
+			Exec:  resolveWindowsItemPath(entries, c.Exec),
 			Args:  c.Args,
 			Shell: c.Shell,
 		})

@@ -726,3 +726,66 @@ func TestBuildZipWithExtras(t *testing.T) {
 		}
 	}
 }
+
+func TestExecTargetPaths(t *testing.T) {
+	cfg := &Config{
+		Commands: []CommandConfig{
+			{Exec: "bin/onepkg"},
+			{Shell: "Write-Host hi"}, // no exec -> ignored
+			{Exec: "bin/helper"},
+		},
+		Services: []ServiceConfig{{Exec: "bin/svc"}},
+	}
+	got := execTargetPaths(cfg)
+	want := map[string]bool{"bin/onepkg": true, "bin/helper": true, "bin/svc": true}
+	if len(got) != len(want) {
+		t.Fatalf("len(targets) = %d, want %d; got %v", len(got), len(want), got)
+	}
+	for k := range want {
+		if !got[k] {
+			t.Errorf("missing exec target %q; got %v", k, got)
+		}
+	}
+}
+
+func TestExecTargetPathsEmpty(t *testing.T) {
+	if got := execTargetPaths(&Config{}); len(got) != 0 {
+		t.Errorf("expected empty target set for empty config; got %v", got)
+	}
+}
+
+func TestApplyExeExtension(t *testing.T) {
+	targets := map[string]bool{"bin/onepkg": true, "bin/tool": true, "bin/myapp.exe": true}
+	resolved := []ResolvedItem{
+		{Original: "bin/onepkg.{platform}", Resolved: "bin/onepkg.windows-amd64", PackPath: "bin/onepkg"},       // exec target, extensionless -> .exe
+		{Original: "bin/tool", Resolved: "bin/tool", PackPath: "bin/tool"},                                        // literal exec target, extensionless -> .exe
+		{Original: "data/README", Resolved: "data/README", PackPath: "data/README"},                                // not an exec target -> unchanged
+		{Original: "bin/myapp.{platform}.exe", Resolved: "bin/myapp.windows-amd64.exe", PackPath: "bin/myapp.exe"}, // exec target, already has extension -> unchanged (idempotent)
+		{Original: "scripts/setup.ps1", Resolved: "scripts/setup.ps1", PackPath: "scripts/setup.ps1"},             // other extension -> unchanged
+	}
+	got := applyExeExtension(resolved, targets)
+	want := []string{"bin/onepkg.exe", "bin/tool.exe", "data/README", "bin/myapp.exe", "scripts/setup.ps1"}
+	for i, w := range want {
+		if got[i].PackPath != w {
+			t.Errorf("item %d PackPath = %q, want %q", i, got[i].PackPath, w)
+		}
+	}
+}
+
+func TestResolveWindowsItemPath(t *testing.T) {
+	entries := []FileEntry{
+		{RelPath: "bin/onepkg.exe"},
+		{RelPath: "etc/config.conf"},
+	}
+	tests := []struct{ ref, want string }{
+		{"bin/onepkg", "bin/onepkg.exe"},     // only the .exe form is packed -> resolve to it
+		{"etc/config.conf", "etc/config.conf"}, // exact match
+		{"bin/missing", "bin/missing"},        // neither form present -> unchanged (fallback)
+		{"", ""},                              // empty ref -> empty
+	}
+	for _, tt := range tests {
+		if got := resolveWindowsItemPath(entries, tt.ref); got != tt.want {
+			t.Errorf("resolveWindowsItemPath(%q) = %q, want %q", tt.ref, got, tt.want)
+		}
+	}
+}

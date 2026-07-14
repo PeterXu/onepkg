@@ -668,3 +668,209 @@ mode = "0755"
 		t.Error("embedded install.ps1 missing the $AppDataFolder definition")
 	}
 }
+
+func TestWindowsRunAutoExeExtension(t *testing.T) {
+	projectDir := t.TempDir()
+	binDir := filepath.Join(projectDir, "bin")
+	os.MkdirAll(binDir, 0755)
+	// Source artifact is extensionless, matching {platform} resolution.
+	os.WriteFile(filepath.Join(binDir, "onepkg.windows-amd64"), []byte("fake-exe"), 0755)
+
+	configContent := `
+name = "rustdesk-config"
+version = "v1.0.0"
+mode = "run"
+items = ["bin/onepkg.{platform}"]
+
+[[commands]]
+exec = "bin/onepkg"
+args = ["--version"]
+`
+	configPath := filepath.Join(projectDir, "config.toml")
+	os.WriteFile(configPath, []byte(configContent), 0644)
+
+	cfg, err := ParseConfig(configPath)
+	if err != nil {
+		t.Fatalf("ParseConfig: %v", err)
+	}
+	cfg.ApplyDefaults()
+	if err := cfg.Validate(projectDir); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+
+	platform := "windows-amd64"
+	entries, err := ResolveItemsForPlatform(projectDir, cfg, platform)
+	if err != nil {
+		t.Fatalf("ResolveItemsForPlatform: %v", err)
+	}
+
+	// The executed item must be packed as bin/onepkg.exe, never bin/onepkg.
+	var sawExe bool
+	for _, e := range entries {
+		if e.RelPath == "bin/onepkg.exe" {
+			sawExe = true
+		}
+		if e.RelPath == "bin/onepkg" {
+			t.Error("extensionless bin/onepkg must not be packed; expected bin/onepkg.exe")
+		}
+	}
+	if !sawExe {
+		t.Fatalf("entries missing bin/onepkg.exe; RelPaths: %v", relPathsOf(entries))
+	}
+
+	outputDir := filepath.Join(projectDir, "packages")
+	os.MkdirAll(outputDir, 0755)
+	if err := BuildForPlatform(cfg, platform, entries, nil, nil, outputDir); err != nil {
+		t.Fatalf("BuildForPlatform: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(outputDir, "rustdesk-config_v1.0.0_windows_amd64.exe"))
+	if err != nil {
+		t.Fatalf("read exe: %v", err)
+	}
+	// run.ps1 must invoke the .exe path, never the extensionless one.
+	if !bytes.Contains(data, []byte("Join-Path $PayloadDir 'bin/onepkg.exe'")) {
+		t.Error("embedded run.ps1 missing 'Join-Path $PayloadDir 'bin/onepkg.exe''")
+	}
+	if bytes.Contains(data, []byte("Join-Path $PayloadDir 'bin/onepkg'")) {
+		t.Error("embedded run.ps1 references extensionless bin/onepkg")
+	}
+}
+
+func TestWindowsRunNonExecItemUnchanged(t *testing.T) {
+	projectDir := t.TempDir()
+	binDir := filepath.Join(projectDir, "bin")
+	dataDir := filepath.Join(projectDir, "data")
+	os.MkdirAll(binDir, 0755)
+	os.MkdirAll(dataDir, 0755)
+	os.WriteFile(filepath.Join(binDir, "onepkg.windows-amd64"), []byte("fake-exe"), 0755)
+	os.WriteFile(filepath.Join(dataDir, "README"), []byte("readme"), 0644)
+
+	cfg := &Config{
+		Name:     "x",
+		Version:  "v1",
+		Mode:     "run",
+		Items:    []string{"bin/onepkg.{platform}", "data/README"},
+		Commands: []CommandConfig{{Exec: "bin/onepkg"}},
+	}
+	entries, err := ResolveItemsForPlatform(projectDir, cfg, "windows-amd64")
+	if err != nil {
+		t.Fatalf("ResolveItemsForPlatform: %v", err)
+	}
+	// bin/onepkg is an exec target -> .exe; data/README is not -> unchanged.
+	for _, e := range entries {
+		if e.RelPath == "data/README.exe" {
+			t.Errorf("non-exec item must not gain .exe; got %q", e.RelPath)
+		}
+	}
+}
+
+func TestResolveItemsForPlatformLinuxNoExe(t *testing.T) {
+	projectDir := t.TempDir()
+	binDir := filepath.Join(projectDir, "bin")
+	os.MkdirAll(binDir, 0755)
+	os.WriteFile(filepath.Join(binDir, "onepkg.linux-arm64"), []byte("x"), 0755)
+
+	cfg := &Config{
+		Name:     "x",
+		Version:  "v1",
+		Items:    []string{"bin/onepkg.{platform}"},
+		Commands: []CommandConfig{{Exec: "bin/onepkg"}}, // exec target, but Linux -> no .exe
+	}
+	entries, err := ResolveItemsForPlatform(projectDir, cfg, "linux-arm64")
+	if err != nil {
+		t.Fatalf("ResolveItemsForPlatform: %v", err)
+	}
+	for _, e := range entries {
+		if e.RelPath == "bin/onepkg.exe" {
+			t.Errorf("Linux build must not add .exe; got %q", e.RelPath)
+		}
+		if e.RelPath != "bin/onepkg" {
+			t.Errorf("Linux pack path = %q, want bin/onepkg", e.RelPath)
+		}
+	}
+}
+
+func TestWindowsInstallAutoExeExtension(t *testing.T) {
+	projectDir := t.TempDir()
+	binDir := filepath.Join(projectDir, "bin")
+	os.MkdirAll(binDir, 0755)
+	os.WriteFile(filepath.Join(binDir, "onepkg.windows-amd64"), []byte("fake-exe"), 0755)
+
+	// Service exec and an overlay both reference the extensionless {platform} item.
+	// The overlay system path uses a {dst.} known folder so it is not Go-validated
+	// for absoluteness on the macOS build host (only literal paths are).
+	configContent := `
+name = "svcapp"
+version = "v1.0.0"
+items = ["bin/onepkg.{platform}"]
+
+[[services]]
+name = "svcapp"
+exec = "bin/onepkg"
+
+[services.windows]
+start_type = "auto"
+
+[[system_overlay]]
+system = "{dst.ProgramFiles64Folder}/OtherApp/conf"
+item = "bin/onepkg"
+`
+	configPath := filepath.Join(projectDir, "config.toml")
+	os.WriteFile(configPath, []byte(configContent), 0644)
+
+	cfg, err := ParseConfig(configPath)
+	if err != nil {
+		t.Fatalf("ParseConfig: %v", err)
+	}
+	cfg.ApplyDefaults()
+	if err := cfg.Validate(projectDir); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+
+	platform := "windows-amd64"
+	entries, err := ResolveItemsForPlatform(projectDir, cfg, platform)
+	if err != nil {
+		t.Fatalf("ResolveItemsForPlatform: %v", err)
+	}
+	var sawExe bool
+	for _, e := range entries {
+		if e.RelPath == "bin/onepkg.exe" {
+			sawExe = true
+		}
+	}
+	if !sawExe {
+		t.Fatalf("entries missing bin/onepkg.exe; RelPaths: %v", relPathsOf(entries))
+	}
+
+	shaMap := make(map[string]string)
+	for _, e := range entries {
+		shaMap[e.RelPath] = e.SHA1
+	}
+	outputDir := filepath.Join(projectDir, "packages")
+	os.MkdirAll(outputDir, 0755)
+	if err := BuildForPlatform(cfg, platform, entries, nil, shaMap, outputDir); err != nil {
+		t.Fatalf("BuildForPlatform: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(outputDir, "svcapp_v1.0.0_windows_amd64.exe"))
+	if err != nil {
+		t.Fatalf("read exe: %v", err)
+	}
+	// Service exec and overlay item must both reference the .exe path.
+	if !bytes.Contains(data, []byte("$SERVICE_EXEC = 'bin/onepkg.exe'")) {
+		t.Error("install.ps1 missing $SERVICE_EXEC = 'bin/onepkg.exe'")
+	}
+	if !bytes.Contains(data, []byte("$OVERLAY_0_ITEM = 'bin/onepkg.exe'")) {
+		t.Error("install.ps1 missing $OVERLAY_0_ITEM = 'bin/onepkg.exe'")
+	}
+}
+
+// relPathsOf returns the RelPath values of entries, for assertion failure messages.
+func relPathsOf(entries []FileEntry) []string {
+	out := make([]string, len(entries))
+	for i, e := range entries {
+		out[i] = e.RelPath
+	}
+	return out
+}

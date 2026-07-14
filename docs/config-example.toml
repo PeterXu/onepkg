@@ -32,6 +32,10 @@ exclude = ["tests/", "*.md", ".git*"]
 # The marker resolves to the actual platform string (e.g., linux-arm64).
 # Example: "bin/myapp.{platform}" resolves to "bin/myapp.linux-arm64" for linux-arm64,
 # and packs as "bin/myapp" (marker stripped) in the final package.
+# On Windows, an item that is executed (commands[].exec / services[].exec) and has
+# no file extension is packed with ".exe" appended automatically, so
+# "bin/myapp.{platform}" packs as "bin/myapp.exe" on windows-amd64 (the exec still
+# reads "bin/myapp"). Linux/macOS pack as "bin/myapp" with no extension.
 items = [
   "bin/myapp.{platform}",  # platform-specific binary (required for each --platform)
   "bin/helper.{platform}", # another platform-specific binary

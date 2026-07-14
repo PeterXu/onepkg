@@ -58,6 +58,79 @@ func ResolveItems(configDir string, items []string, platform string) ([]Resolved
 	return resolved, nil
 }
 
+// execTargetPaths returns the set of config-form exec references that name
+// bundled items: every non-empty commands[].exec plus the single service exec
+// (cfg.Services[0].Exec). The keys are identical to an item's stripped pack path
+// (e.g. "bin/onepkg"), so applyExeExtension can match items to execs directly.
+func execTargetPaths(cfg *Config) map[string]bool {
+	targets := make(map[string]bool)
+	for _, c := range cfg.Commands {
+		if c.Exec != "" {
+			targets[c.Exec] = true
+		}
+	}
+	if len(cfg.Services) > 0 && cfg.Services[0].Exec != "" {
+		targets[cfg.Services[0].Exec] = true
+	}
+	return targets
+}
+
+// applyExeExtension appends ".exe" to the pack path of any resolved item that is
+// both an exec target and extensionless. It never touches items that already have
+// a file extension or that are not referenced by an exec. This is the Windows-only
+// pass that lets an extensionless {platform} binary (packed as "bin/onepkg") be
+// launched by Windows (as "bin/onepkg.exe"). The match uses the pre-extension
+// PackPath, which equals the config-form exec string that itemMatches validates.
+func applyExeExtension(resolved []ResolvedItem, execTargets map[string]bool) []ResolvedItem {
+	for i := range resolved {
+		ri := &resolved[i]
+		if execTargets[ri.PackPath] && filepath.Ext(ri.PackPath) == "" {
+			ri.PackPath += ".exe"
+		}
+	}
+	return resolved
+}
+
+// resolveWindowsItemPath maps a config reference (a command/service exec, or an
+// overlay item) to its actual packed path. It returns ref unchanged when an entry
+// matches exactly (already-extensioned or non-extended refs); otherwise ref+".exe"
+// when that matches (the Windows auto-extension); otherwise ref unchanged as a
+// defensive fallback. With a valid config the fallback is unreachable for exec and
+// overlay refs.
+func resolveWindowsItemPath(entries []FileEntry, ref string) string {
+	if ref == "" {
+		return ""
+	}
+	for _, e := range entries {
+		if e.RelPath == ref {
+			return ref
+		}
+	}
+	withExe := ref + ".exe"
+	for _, e := range entries {
+		if e.RelPath == withExe {
+			return withExe
+		}
+	}
+	return ref
+}
+
+// ResolveItemsForPlatform is the single entry point for the per-platform item
+// pipeline: it resolves {platform} markers, applies the Windows .exe extension to
+// executed extensionless items, and collects the file entries. main()'s build loop
+// and the build tests both use it so the .exe wiring lives in exactly one place.
+func ResolveItemsForPlatform(configDir string, cfg *Config, platform string) ([]FileEntry, error) {
+	resolved, err := ResolveItems(configDir, cfg.Items, platform)
+	if err != nil {
+		return nil, err
+	}
+	goos := strings.SplitN(platform, "-", 2)[0]
+	if goos == "windows" {
+		resolved = applyExeExtension(resolved, execTargetPaths(cfg))
+	}
+	return CollectFilesResolved(configDir, resolved, cfg.Exclude)
+}
+
 func CollectFiles(configDir string, items []string) ([]FileEntry, error) {
 	return CollectFilesWithExclude(configDir, items, nil)
 }
