@@ -141,11 +141,13 @@ recovery_delay_ms = 5000       # delay before restart on failure in ms (default:
 # restart_sec = 10
 
 # --- mode = "run": one-shot command/script package (Windows-only) ---
-# Double-clicking the .exe runs the commands once in order, then exits.
+# Double-clicking the .exe runs ALL commands (continuing past failures), then
+# shows a Windows MessageBox summarizing each command's result ([OK]/[FAIL] +
+# exit code) and a tally, and exits 0 (all ok) or 1 (any failed).
 # No install/uninstall, no service, no permanent files. Items are optional
 # (omit them for shell-only packages).
-# NOTE: run packages are interactive-only today - they wait on 'Read-Host' before exiting,
-# so they are not suited to scheduled/CI/unattended use (a future 'quiet'/'no_pause' option may change this).
+# NOTE: run packages are interactive-only - the results MessageBox is modal, so
+# they are not suited to scheduled/CI/unattended use (a future 'quiet' option may change this).
 #
 # name = "cleanup-bundle"
 # version = "v1.0.0"

@@ -74,15 +74,30 @@ func GeneratePowerShellRunner(cfg PowerShellRunnerConfig) (string, error) {
 	if cfg.HasPayload {
 		b.WriteString("    Expand-Archive -Path (Join-Path $PayloadDir 'payload.zip') -DestinationPath $PayloadDir -Force\n")
 	}
+	b.WriteString("    $results = @()\n")
+	b.WriteString("    $failures = 0\n")
 	fmt.Fprintf(&b, "    Write-Host 'Running %d command(s) for %s %s'\n", len(cfg.Commands), cfg.Name, cfg.Version)
 	for _, cmd := range cfg.Commands {
 		b.WriteString(runnerCommandBlock(cmd))
 	}
-	fmt.Fprintf(&b, "    Write-Host 'Completed %d command(s)'\n", len(cfg.Commands))
+	// Results dialog: one line per command + tally. ASCII markers and an ASCII
+	// hyphen in the title — run.ps1 is BOM-less UTF-8 and PowerShell 5.1 would
+	// misread non-ASCII bytes. [Environment]::NewLine avoids backtick escaping.
+	b.WriteString("    Add-Type -AssemblyName System.Windows.Forms\n")
+	b.WriteString("    $nl = [Environment]::NewLine\n")
+	b.WriteString("    $tally = ('{0} of {1} commands succeeded.' -f ($results.Count - $failures), $results.Count)\n")
+	b.WriteString("    $message = ($results -join $nl) + $nl + $nl + $tally\n")
+	title := psQuote(cfg.Name + " " + cfg.Version + " - run results")
+	b.WriteString("    if ($failures -eq 0) {\n")
+	b.WriteString("        $icon = [System.Windows.Forms.MessageBoxIcon]::Information\n")
+	b.WriteString("    } else {\n")
+	b.WriteString("        $icon = [System.Windows.Forms.MessageBoxIcon]::Warning\n")
+	b.WriteString("    }\n")
+	b.WriteString("    [System.Windows.Forms.MessageBox]::Show($message, " + title + ", [System.Windows.Forms.MessageBoxButtons]::OK, $icon) | Out-Null\n")
+	b.WriteString("    if ($failures -gt 0) { exit 1 } else { exit 0 }\n")
 	b.WriteString("} finally {\n")
 	b.WriteString("    Pop-Location\n")
 	b.WriteString("}\n")
-	b.WriteString("Read-Host 'Press Enter to exit'\n")
 
 	return b.String(), nil
 }
@@ -98,9 +113,22 @@ func argPS(a string) string {
 	return e
 }
 
-// runnerCommandBlock renders one command's log line, invocation, and fail-fast check.
+// commandLabel returns the human-readable form of a command for the results
+// dialog: exec plus its args space-joined, or the shell expression.
+func commandLabel(cmd CommandSpec) string {
+	if cmd.Exec != "" {
+		parts := append([]string{cmd.Exec}, cmd.Args...)
+		return strings.Join(parts, " ")
+	}
+	return cmd.Shell
+}
+
+// runnerCommandBlock renders one command's real-time log line, invocation, and
+// result recording. Execution is run-all: a failure is recorded into $results
+// and bumps $failures instead of aborting.
 func runnerCommandBlock(cmd CommandSpec) string {
 	var b strings.Builder
+	label := psQuote(commandLabel(cmd))
 	if cmd.Exec != "" {
 		// Log: Write-Host 'Running:' '<exec>' '<arg>' ...  (all single-quoted via psQuote)
 		b.WriteString("    Write-Host 'Running:'")
@@ -116,15 +144,18 @@ func runnerCommandBlock(cmd CommandSpec) string {
 			b.WriteString(" " + argPS(a))
 		}
 		b.WriteString("\n")
-		b.WriteString("    if ((-not $?) -or ($LASTEXITCODE -ne 0)) { Write-Host ('Command failed with exit code ' + $LASTEXITCODE); Read-Host 'Press Enter to exit'; exit 1 }\n")
 	} else {
 		b.WriteString("    Write-Host 'Running:' " + psQuote(ReplaceMarkers(cmd.Shell)) + "\n")
-		// Reset $LASTEXITCODE so we can detect failures. $? reflects the evaluated expression's success,
-		// but for non-terminating errors inside Invoke-Expression, may not reliably become $false depending on
-		// $ErrorActionPreference. $LASTEXITCODE is the reliable signal for native-exe failures; $? catches terminating/cmdlet failures.
 		b.WriteString("    $LASTEXITCODE = 0\n")
 		b.WriteString("    Invoke-Expression " + psQuote(ReplaceMarkers(cmd.Shell)) + "\n")
-		b.WriteString("    if ((-not $?) -or ($LASTEXITCODE -ne 0)) { Write-Host 'Command failed'; Read-Host 'Press Enter to exit'; exit 1 }\n")
 	}
+	// Record result (run-all, no fail-fast). Exit code is shown only when non-zero,
+	// so a failed cmdlet (which leaves $LASTEXITCODE at 0) does not read "(exit 0)".
+	b.WriteString("    if ((-not $?) -or ($LASTEXITCODE -ne 0)) {\n")
+	b.WriteString("        $results += '[FAIL] ' + " + label + " + $(if ($LASTEXITCODE -ne 0) { ' (exit ' + $LASTEXITCODE + ')' })\n")
+	b.WriteString("        $failures++\n")
+	b.WriteString("    } else {\n")
+	b.WriteString("        $results += '[OK]  ' + " + label + "\n")
+	b.WriteString("    }\n")
 	return b.String()
 }

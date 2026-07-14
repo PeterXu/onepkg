@@ -34,18 +34,38 @@ func TestGeneratePowerShellRunner(t *testing.T) {
 		"function CheckArch",
 		"function CheckAdmin", // RequireAdmin = true
 		"Expand-Archive",      // HasPayload = true
-		"& (Join-Path $PayloadDir 'bin/cleanup')",
+		"& (Join-Path $PayloadDir 'bin/cleanup')", // exec invocation preserved
 		"'--all'",
 		"'--force'",
-		"Invoke-Expression 'netsh advfirewall set allprofiles state off'",
-		"$LASTEXITCODE = 0",                   // shell reset before Invoke-Expression
-		"(-not $?) -or ($LASTEXITCODE -ne 0)", // fail-fast condition for both exec and shell
-		"exit 1",                              // fail-fast present
-		"Read-Host 'Press Enter to exit'",
+		"Invoke-Expression 'netsh advfirewall set allprofiles state off'", // shell invocation preserved
+		"$LASTEXITCODE = 0",                   // still reset before each command
+		"(-not $?) -or ($LASTEXITCODE -ne 0)", // condition reused to record result
+		"$results = @()",                      // run-all result accumulator
+		"$failures = 0",
+		"$results += '[OK]  '",  // success recorded (ASCII, two trailing spaces)
+		"$results += '[FAIL] '", // failure recorded (ASCII, one trailing space)
+		"$failures++",
+		"Add-Type -AssemblyName System.Windows.Forms",
+		"[System.Windows.Forms.MessageBox]::Show(",
+		"'cleanup v1.0.0 - run results'",                 // title (ASCII hyphen, name+version)
+		"'{0} of {1} commands succeeded.'",               // tally
+		"[System.Windows.Forms.MessageBoxIcon]::Information", // icon when all ok
+		"[System.Windows.Forms.MessageBoxIcon]::Warning",     // icon when any failed
+		"if ($failures -gt 0) { exit 1 } else { exit 0 }", // exit code by overall result
 	}
 	for _, s := range mustContain {
 		if !strings.Contains(out, s) {
 			t.Errorf("output missing %q", s)
+		}
+	}
+
+	mustNotContain := []string{
+		"Read-Host 'Press Enter to exit'", // removed; the modal dialog is the acknowledgment
+		"Write-Host 'Completed ",          // replaced by the MessageBox tally
+	}
+	for _, s := range mustNotContain {
+		if strings.Contains(out, s) {
+			t.Errorf("output should not contain %q", s)
 		}
 	}
 }
