@@ -2080,3 +2080,239 @@ func TestValidateRejectsStrayDstMarkerInServiceExec(t *testing.T) {
 		t.Errorf("error should explain {dst.NAME} placement, got: %v", err)
 	}
 }
+
+func TestCommandConfigResolveFor(t *testing.T) {
+	cases := []struct {
+		name string
+		goos string
+		in   CommandConfig
+		want CommandConfig
+	}{
+		{
+			name: "linux uses override exec/args, ignores windows",
+			goos: "linux",
+			in: CommandConfig{
+				Exec: "bin/cleanup", Args: []string{"--all"},
+				ExecLinux: "bin/cleanup-linux", ArgsLinux: []string{"--linux"},
+				ExecWindows: "bin/cleanup.exe", ArgsWindows: []string{"/all"},
+			},
+			want: CommandConfig{Exec: "bin/cleanup-linux", Args: []string{"--linux"}},
+		},
+		{
+			name: "windows uses override exec/args",
+			goos: "windows",
+			in: CommandConfig{
+				Exec: "bin/cleanup", Args: []string{"--all"},
+				ExecWindows: "bin/cleanup.exe", ArgsWindows: []string{"/all"},
+			},
+			want: CommandConfig{Exec: "bin/cleanup.exe", Args: []string{"/all"}},
+		},
+		{
+			name: "macos falls back to base when no override",
+			goos: "darwin",
+			in: CommandConfig{
+				Shell:       "echo base",
+				ShellLinux:  "echo linux",
+				ShellMacos:  "", // unset -> base
+			},
+			want: CommandConfig{Shell: "echo base"},
+		},
+		{
+			name: "empty override slice falls back to base args",
+			goos: "linux",
+			in: CommandConfig{
+				Exec: "bin/x", Args: []string{"--base"},
+				ArgsLinux: []string{}, // empty -> base
+			},
+			want: CommandConfig{Exec: "bin/x", Args: []string{"--base"}},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.in.resolveFor(tc.goos)
+			if got.Exec != tc.want.Exec {
+				t.Errorf("Exec = %q, want %q", got.Exec, tc.want.Exec)
+			}
+			if got.Shell != tc.want.Shell {
+				t.Errorf("Shell = %q, want %q", got.Shell, tc.want.Shell)
+			}
+			if !equalArgs(got.Args, tc.want.Args) {
+				t.Errorf("Args = %v, want %v", got.Args, tc.want.Args)
+			}
+			// Override fields must be zeroed on the resolved value.
+			if got.ExecLinux != "" || got.ExecMacos != "" || got.ExecWindows != "" {
+				t.Errorf("exec override fields not zeroed: %+v", got)
+			}
+			if got.ShellLinux != "" || got.ShellMacos != "" || got.ShellWindows != "" {
+				t.Errorf("shell override fields not zeroed: %+v", got)
+			}
+			if len(got.ArgsLinux) != 0 || len(got.ArgsMacos) != 0 || len(got.ArgsWindows) != 0 {
+				t.Errorf("args override fields not zeroed: %+v", got)
+			}
+		})
+	}
+}
+
+func equalArgs(a, b []string) bool {
+	if len(a) == 0 && len(b) == 0 {
+		return true
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func TestDirConfigResolveFor(t *testing.T) {
+	d := DirConfig{
+		Path: "/var/lib/x", Owner: "root", Group: "root", Mode: "0755",
+		PathMacos: "/Library/Application Support/x",
+	}
+	got := d.resolveFor("darwin")
+	if got.Path != "/Library/Application Support/x" {
+		t.Errorf("darwin Path = %q", got.Path)
+	}
+	if got.Owner != "root" || got.Mode != "0755" {
+		t.Errorf("non-path fields must be preserved: %+v", got)
+	}
+	if got.PathMacos != "" || got.PathLinux != "" {
+		t.Errorf("path override fields not zeroed: %+v", got)
+	}
+	if d.resolveFor("linux").Path != "/var/lib/x" {
+		t.Error("linux should fall back to base path")
+	}
+}
+
+func TestOverlayConfigResolveFor(t *testing.T) {
+	o := OverlayConfig{
+		System: "/etc/x", Item: "data/x",
+		SystemWindows: "{dst.CommonAppDataFolder}\\x",
+	}
+	got := o.resolveFor("windows")
+	if got.System != `{dst.CommonAppDataFolder}\x` {
+		t.Errorf("windows System = %q", got.System)
+	}
+	if got.Item != "data/x" {
+		t.Errorf("Item must be preserved: %q", got.Item)
+	}
+	if o.resolveFor("linux").System != "/etc/x" {
+		t.Error("linux should fall back to base system path")
+	}
+}
+
+func TestConfigResolveForDoesNotMutateOriginal(t *testing.T) {
+	cfg := Config{
+		Name: "x", Version: "v1",
+		Commands: []CommandConfig{{Exec: "bin/a", ExecLinux: "bin/a-linux"}},
+		Dirs:     []DirConfig{{Path: "/p", PathMacos: "/pmac"}},
+		SystemOverlay: []OverlayConfig{{System: "/s", SystemWindows: "\\swin"}},
+	}
+	resolved := cfg.resolveFor("darwin")
+	// Resolved values for darwin.
+	if resolved.Commands[0].Exec != "bin/a" {
+		t.Errorf("darwin command Exec = %q, want bin/a", resolved.Commands[0].Exec)
+	}
+	if resolved.Dirs[0].Path != "/pmac" {
+		t.Errorf("darwin dir Path = %q, want /pmac", resolved.Dirs[0].Path)
+	}
+	if resolved.SystemOverlay[0].System != "/s" {
+		t.Errorf("darwin overlay System = %q, want /s", resolved.SystemOverlay[0].System)
+	}
+	// Original must be untouched.
+	if cfg.Commands[0].ExecLinux != "bin/a-linux" {
+		t.Error("resolveFor mutated the original cfg.Commands")
+	}
+	if cfg.Dirs[0].PathMacos != "/pmac" {
+		t.Error("resolveFor mutated the original cfg.Dirs")
+	}
+}
+
+func TestValidateAllowsDstMarkerInOverrideFields(t *testing.T) {
+	dir := t.TempDir()
+	binDir := filepath.Join(dir, "bin")
+	os.MkdirAll(binDir, 0755)
+	os.WriteFile(filepath.Join(binDir, "cleanup"), []byte("x"), 0755)
+
+	full := `
+name = "x"
+version = "v1"
+mode = "run"
+items = ["bin/cleanup"]
+
+[[commands]]
+exec = "bin/cleanup"
+shell_linux = "mkdir -p {dst.HOME}/.config/x"
+args_windows = ["{dst.AppDataFolder}\\cfg"]
+`
+	path := filepath.Join(dir, "config.toml")
+	os.WriteFile(path, []byte(full), 0644)
+	cfg, err := ParseConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.ApplyDefaults()
+	if err := cfg.Validate(dir); err != nil {
+		t.Fatalf("{dst.*} in override fields should be allowed: %v", err)
+	}
+}
+
+func TestValidateRejectsDstMarkerInOverrideExec(t *testing.T) {
+	dir := t.TempDir()
+	binDir := filepath.Join(dir, "bin")
+	os.MkdirAll(binDir, 0755)
+	os.WriteFile(filepath.Join(binDir, "cleanup"), []byte("x"), 0755)
+
+	full := `
+name = "x"
+version = "v1"
+mode = "run"
+items = ["bin/cleanup"]
+
+[[commands]]
+exec = "bin/cleanup"
+exec_windows = "{dst.AppDataFolder}\\cleanup.exe"
+`
+	path := filepath.Join(dir, "config.toml")
+	os.WriteFile(path, []byte(full), 0644)
+	cfg, err := ParseConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.ApplyDefaults()
+	if err := cfg.Validate(dir); err == nil {
+		t.Fatal("{dst.*} in exec_windows should be rejected (exec is not a supported field)")
+	}
+}
+
+func TestValidateAllowsDstMarkerInDirPathOverride(t *testing.T) {
+	dir := t.TempDir()
+	full := `
+name = "x"
+version = "v1"
+items = ["bin/x"]
+
+[[dirs]]
+path = "/var/lib/x"
+path_macos = "{dst.HOME}/.config/x"
+mode = "0755"
+`
+	// bin/x must exist for install-mode item validation.
+	binDir := filepath.Join(dir, "bin")
+	os.MkdirAll(binDir, 0755)
+	os.WriteFile(filepath.Join(binDir, "x"), []byte("x"), 0755)
+	path := filepath.Join(dir, "config.toml")
+	os.WriteFile(path, []byte(full), 0644)
+	cfg, err := ParseConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.ApplyDefaults()
+	if err := cfg.Validate(dir); err != nil {
+		t.Fatalf("{dst.HOME} in path_macos should be allowed: %v", err)
+	}
+}

@@ -789,3 +789,25 @@ func TestResolveWindowsItemPath(t *testing.T) {
 		}
 	}
 }
+
+func TestExecTargetPathsIncludesWindowsOverride(t *testing.T) {
+	cfg := &Config{
+		Commands: []CommandConfig{
+			{Exec: "bin/a", ExecWindows: "bin/a-win"},
+			{Shell: "echo hi"}, // not an exec target
+			{ExecLinux: "bin/b-linux", ExecWindows: "bin/b-win"}, // base exec empty
+		},
+	}
+	got := execTargetPaths(cfg)
+	want := map[string]bool{"bin/a-win": true, "bin/b-win": true}
+	for k := range want {
+		if !got[k] {
+			t.Errorf("execTargetPaths missing windows override %q; got %v", k, got)
+		}
+	}
+	// Base-only exec (no windows override) still included via fallback.
+	cfg2 := &Config{Commands: []CommandConfig{{Exec: "bin/c"}}}
+	if !execTargetPaths(cfg2)["bin/c"] {
+		t.Error("base exec with no windows override should be included")
+	}
+}

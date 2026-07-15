@@ -205,23 +205,42 @@ func BuildForPlatform(cfg *Config, platform string, entries []FileEntry, tarData
 	goos := parts[0]
 	arch := parts[1]
 
-	if cfg.Mode == "run" && goos != "windows" {
-		return fmt.Errorf("mode=\"run\" is Windows-only; got platform %q", platform)
-	}
+	// Collapse per-OS overrides to the effective values for this target. Operate
+	// on a local copy so main()'s shared *Config is untouched across platforms.
+	resolved := cfg.resolveFor(goos)
+	cfg = &resolved
 
-	// Windows known-folder variables in install path fields are not resolvable on
-	// Linux/macOS targets; fail fast rather than emit a meaningless literal.
+	// Windows-only {dst.*} markers cannot resolve on Linux/macOS targets. Check
+	// the RESOLVED path for this OS (so a marker in path_windows does not affect
+	// a linux build); {dst.HOME} is cross-platform and allowed.
 	if goos != "windows" {
 		for _, d := range cfg.Dirs {
-			if installer.HasKnownFolderMarker(d.Path) {
+			if installer.HasWindowsOnlyKnownFolderMarker(d.Path) {
 				return fmt.Errorf("Windows known-folder variable in dirs[].path %q is not supported on %s; build for windows or remove it", d.Path, goos)
 			}
 		}
 		for _, o := range cfg.SystemOverlay {
-			if installer.HasKnownFolderMarker(o.System) {
+			if installer.HasWindowsOnlyKnownFolderMarker(o.System) {
 				return fmt.Errorf("Windows known-folder variable in system_overlay[].system %q is not supported on %s; build for windows or remove it", o.System, goos)
 			}
 		}
+		// Substitute the cross-platform {dst.HOME} marker -> $HOME on Unix targets
+		// (install-mode paths here; run-mode commands are substituted in
+		// BuildForUnixRun). The shell expands $HOME at runtime.
+		for i := range cfg.Dirs {
+			cfg.Dirs[i].Path = substituteHomeUnix(cfg.Dirs[i].Path)
+		}
+		for i := range cfg.SystemOverlay {
+			cfg.SystemOverlay[i].System = substituteHomeUnix(cfg.SystemOverlay[i].System)
+		}
+	}
+
+	// Route unix run mode to the dedicated builder (before install-only VERSION generation)
+	if cfg.Mode == "run" && (goos == "linux" || goos == "darwin") {
+		if err := validateResolvedCommands(cfg, goos); err != nil {
+			return err
+		}
+		return BuildForUnixRun(cfg, platform, entries, outputDir)
 	}
 
 	versionContent, err := GenerateVersion(VersionInfo{
@@ -455,6 +474,10 @@ func BuildForWindowsRun(cfg *Config, platform string, entries []FileEntry, outpu
 	parts := strings.SplitN(platform, "-", 2)
 	arch := parts[1]
 
+	if err := validateResolvedCommands(cfg, "windows"); err != nil {
+		return err
+	}
+
 	// No VERSION file: run mode has no verify action. Empty zip when no entries.
 	payloadZip, err := BuildZipWithExtras(entries, *cfg.PreservePermissions, nil)
 	if err != nil {
@@ -496,6 +519,81 @@ func BuildForWindowsRun(cfg *Config, platform string, entries []FileEntry, outpu
 
 	outputPath := platformOutputPath(cfg, platform, outputDir)
 	return os.WriteFile(outputPath, exeData, 0755)
+}
+
+// validateResolvedCommands checks the per-platform run-mode command rules that
+// Validate() cannot (it has no target OS): each resolved command has exactly
+// one of exec/shell (guaranteed by base-type-fixed resolution) and, if exec,
+// the resolved exec names a bundled item. cfg must already be resolveFor(goos).
+func validateResolvedCommands(cfg *Config, goos string) error {
+	for i, c := range cfg.Commands {
+		if c.Exec != "" && !itemMatches(cfg.Items, c.Exec) {
+			return fmt.Errorf("command %d exec %q not found in items for %s", i, c.Exec, goos)
+		}
+	}
+	return nil
+}
+
+// BuildForUnixRun builds a mode="run" self-extracting .sh for Linux/macOS:
+// a tar.gz payload (no VERSION), a lean run .sh, written with the .sh extension.
+// {dst.HOME} is substituted to the literal $HOME token (the shell expands it).
+func BuildForUnixRun(cfg *Config, platform string, entries []FileEntry, outputDir string) error {
+	parts := strings.SplitN(platform, "-", 2)
+	goos, arch := parts[0], parts[1]
+
+	// No VERSION file: run mode has no verify action. Empty/nil when no entries.
+	var tarData []byte
+	var err error
+	if len(entries) > 0 {
+		tarData, err = BuildTarGZ(entries, *cfg.PreservePermissions)
+		if err != nil {
+			return fmt.Errorf("build tar.gz: %w", err)
+		}
+	}
+
+	commands := make([]installer.CommandSpec, 0, len(cfg.Commands))
+	for _, c := range cfg.Commands {
+		// cfg is already resolved for goos; collapse to a CommandSpec and
+		// substitute {dst.HOME} -> $HOME in the effective strings.
+		commands = append(commands, installer.CommandSpec{
+			Exec:  substituteHomeUnix(c.Exec),
+			Args:  substituteHomeUnixArgs(c.Args),
+			Shell: substituteHomeUnix(c.Shell),
+		})
+	}
+
+	script, err := installer.GenerateShellRunner(installer.ShellRunnerConfig{
+		Name:          cfg.Name,
+		Version:       cfg.Version,
+		Platform:      platform,
+		ExpectedArch:  unameArch(goos, arch),
+		Goos:          goos,
+		HasPayload:    len(entries) > 0,
+		PayloadBase64: base64.StdEncoding.EncodeToString(tarData),
+		Commands:      commands,
+	})
+	if err != nil {
+		return fmt.Errorf("generate run script: %w", err)
+	}
+
+	outputPath := platformOutputPath(cfg, platform, outputDir)
+	return os.WriteFile(outputPath, []byte(script), 0755)
+}
+
+// substituteHomeUnix replaces the cross-platform {dst.HOME} marker with the
+// literal $HOME token for Unix targets (the shell expands $HOME at runtime).
+// Other {dst.*} markers are Windows-only and rejected by the build guard, so
+// they never reach here on a unix build.
+func substituteHomeUnix(s string) string {
+	return strings.ReplaceAll(s, "{dst.HOME}", "$HOME")
+}
+
+func substituteHomeUnixArgs(args []string) []string {
+	out := make([]string, len(args))
+	for i, a := range args {
+		out[i] = substituteHomeUnix(a)
+	}
+	return out
 }
 
 func platformOutputPath(cfg *Config, platform string, outputDir string) string {

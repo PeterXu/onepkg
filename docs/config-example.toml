@@ -227,3 +227,22 @@ recovery_delay_ms = 5000       # delay before restart on failure in ms (default:
 #
 # version = "{env.BUILD_VERSION}"
 # output_dir = "{env.DIST_DIR}"
+
+# ── Cross-platform run-mode example ──────────────────────────────────────────
+# mode = "run" builds a one-shot package. One [[commands]] list serves all
+# platforms: each field's effective value is the <field>_<os> override if set,
+# else the base field. {dst.HOME} resolves to $HOME on every platform.
+#
+# name = "diag"
+# version = "v1.0.0"
+# mode = "run"
+# items = ["bin/diag.{platform}"]
+#
+# [[commands]]
+# exec          = "bin/diag"            # all platforms (.exe auto-appended on Windows)
+# args          = ["--check"]
+# args_windows  = ["/check"]            # windows-only arg shape
+#
+# [[commands]]
+# shell         = "mkdir -p {dst.HOME}/.config/diag"   # base (linux/macos)
+# shell_windows = "New-Item -ItemType Directory -Force \"$env:APPDATA\\diag\""

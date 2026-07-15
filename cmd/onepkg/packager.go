@@ -59,14 +59,21 @@ func ResolveItems(configDir string, items []string, platform string) ([]Resolved
 }
 
 // execTargetPaths returns the set of config-form exec references that name
-// bundled items: every non-empty commands[].exec plus the single service exec
-// (cfg.Services[0].Exec). The keys are identical to an item's stripped pack path
-// (e.g. "bin/onepkg"), so applyExeExtension can match items to execs directly.
+// bundled items: every non-empty commands[].exec (resolved for Windows, since
+// the .exe pass is Windows-only) plus the single service exec. The keys are
+// identical to an item's stripped pack path (e.g. "bin/onepkg"), so
+// applyExeExtension can match items to execs directly.
 func execTargetPaths(cfg *Config) map[string]bool {
 	targets := make(map[string]bool)
 	for _, c := range cfg.Commands {
-		if c.Exec != "" {
-			targets[c.Exec] = true
+		// The .exe extension pass only runs on Windows builds, so resolve the
+		// exec for Windows: exec_windows if set, else the base exec.
+		exec := c.ExecWindows
+		if exec == "" {
+			exec = c.Exec
+		}
+		if exec != "" {
+			targets[exec] = true
 		}
 	}
 	if len(cfg.Services) > 0 && cfg.Services[0].Exec != "" {

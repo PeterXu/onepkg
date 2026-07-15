@@ -108,10 +108,12 @@ func walkStringsInto(v reflect.Value, path string, fn func(path string, s *strin
 // check to catch {dst.NAME} used in fields that do not resolve destination markers.
 var dstMarkerRe = regexp.MustCompile(`\{dst\.`)
 
-// dstSupportedFieldRe matches the dotted field paths of the four field types that
+// dstSupportedFieldRe matches the dotted field paths of the field types that
 // resolve {dst.NAME} at install/run time: dirs[].path, system_overlay[].system,
-// and run-mode commands[].args / commands[].shell.
-var dstSupportedFieldRe = regexp.MustCompile(`^(Dirs\[\d+\]\.Path|SystemOverlay\[\d+\]\.System|Commands\[\d+\]\.Args\[\d+\]|Commands\[\d+\]\.Shell)$`)
+// and run-mode commands[].args / commands[].shell — including their per-OS
+// override variants (PathLinux, ShellMacos, ArgsWindows[i], ...). The reflection
+// walker reports slice elements as Name[i], so args variants are Args<OS>[i].
+var dstSupportedFieldRe = regexp.MustCompile(`^(Dirs\[\d+\]\.(Path|PathLinux|PathMacos|PathWindows)|SystemOverlay\[\d+\]\.(System|SystemLinux|SystemMacos|SystemWindows)|Commands\[\d+\]\.(Args|ArgsLinux|ArgsMacos|ArgsWindows)\[\d+\]|Commands\[\d+\]\.(Shell|ShellLinux|ShellMacos|ShellWindows))$`)
 
 func isDstSupportedField(path string) bool {
 	return dstSupportedFieldRe.MatchString(path)

@@ -28,11 +28,68 @@ type Config struct {
 }
 
 // CommandConfig is one entry in [[commands]] for mode = "run" packages.
-// Exactly one of Exec or Shell must be set.
+// Exactly one of the base Exec or Shell must be set. Per-OS override fields
+// (<field>_<os>) refine the same-typed value for that OS family when set;
+// otherwise the base value is used. See resolveFor.
 type CommandConfig struct {
 	Exec  string   `toml:"exec"`  // bundled file path, resolved against the temp extraction dir; empty if Shell set
 	Args  []string `toml:"args"`  // args for Exec
-	Shell string   `toml:"shell"` // arbitrary PowerShell expression; empty if Exec set
+	Shell string   `toml:"shell"` // arbitrary shell expression; empty if Exec set
+	// Per-OS overrides (effective value = override if set, else base).
+	ExecLinux    string   `toml:"exec_linux"`
+	ExecMacos    string   `toml:"exec_macos"`
+	ExecWindows  string   `toml:"exec_windows"`
+	ArgsLinux    []string `toml:"args_linux"`
+	ArgsMacos    []string `toml:"args_macos"`
+	ArgsWindows  []string `toml:"args_windows"`
+	ShellLinux   string   `toml:"shell_linux"`
+	ShellMacos   string   `toml:"shell_macos"`
+	ShellWindows string   `toml:"shell_windows"`
+}
+
+// resolveFor returns a CommandConfig with the effective Exec/Args/Shell for the
+// given target OS family (override if set, else base), and all override fields
+// zeroed. A command's type (exec vs shell) is fixed by its base field.
+func (c CommandConfig) resolveFor(goos string) CommandConfig {
+	pickStr := func(def, linux, macos, windows string) string {
+		switch goos {
+		case "linux":
+			if linux != "" {
+				return linux
+			}
+		case "darwin":
+			if macos != "" {
+				return macos
+			}
+		case "windows":
+			if windows != "" {
+				return windows
+			}
+		}
+		return def
+	}
+	pickArgs := func(def, linux, macos, windows []string) []string {
+		switch goos {
+		case "linux":
+			if len(linux) > 0 {
+				return linux
+			}
+		case "darwin":
+			if len(macos) > 0 {
+				return macos
+			}
+		case "windows":
+			if len(windows) > 0 {
+				return windows
+			}
+		}
+		return def
+	}
+	return CommandConfig{
+		Exec:  pickStr(c.Exec, c.ExecLinux, c.ExecMacos, c.ExecWindows),
+		Args:  pickArgs(c.Args, c.ArgsLinux, c.ArgsMacos, c.ArgsWindows),
+		Shell: pickStr(c.Shell, c.ShellLinux, c.ShellMacos, c.ShellWindows),
+	}
 }
 
 type ServiceConfig struct {
@@ -73,11 +130,59 @@ type DirConfig struct {
 	Owner string `toml:"owner"` // Optional, default: service user or root
 	Group string `toml:"group"` // Optional, default: same as owner
 	Mode  string `toml:"mode"`  // Optional, default: "0755"
+	// Per-OS path overrides (effective = override if set, else Path).
+	PathLinux   string `toml:"path_linux"`
+	PathMacos   string `toml:"path_macos"`
+	PathWindows string `toml:"path_windows"`
+}
+
+func (d DirConfig) resolveFor(goos string) DirConfig {
+	out := d
+	switch goos {
+	case "linux":
+		if d.PathLinux != "" {
+			out.Path = d.PathLinux
+		}
+	case "darwin":
+		if d.PathMacos != "" {
+			out.Path = d.PathMacos
+		}
+	case "windows":
+		if d.PathWindows != "" {
+			out.Path = d.PathWindows
+		}
+	}
+	out.PathLinux, out.PathMacos, out.PathWindows = "", "", ""
+	return out
 }
 
 type OverlayConfig struct {
 	System string `toml:"system"`
 	Item   string `toml:"item"`
+	// Per-OS system-path overrides (effective = override if set, else System).
+	SystemLinux   string `toml:"system_linux"`
+	SystemMacos   string `toml:"system_macos"`
+	SystemWindows string `toml:"system_windows"`
+}
+
+func (o OverlayConfig) resolveFor(goos string) OverlayConfig {
+	out := o
+	switch goos {
+	case "linux":
+		if o.SystemLinux != "" {
+			out.System = o.SystemLinux
+		}
+	case "darwin":
+		if o.SystemMacos != "" {
+			out.System = o.SystemMacos
+		}
+	case "windows":
+		if o.SystemWindows != "" {
+			out.System = o.SystemWindows
+		}
+	}
+	out.SystemLinux, out.SystemMacos, out.SystemWindows = "", "", ""
+	return out
 }
 
 func ParseConfig(path string) (*Config, error) {
@@ -90,6 +195,27 @@ func ParseConfig(path string) (*Config, error) {
 		return nil, fmt.Errorf("unmarshal config: %w", err)
 	}
 	return &cfg, nil
+}
+
+// resolveFor returns a copy of c with every per-platform override field
+// (commands, dirs, system_overlay) collapsed to its effective value for the
+// given target OS family. Base values are used where no override is set. The
+// receiver is NOT mutated, so main()'s shared *Config is safe across platforms.
+func (c Config) resolveFor(goos string) Config {
+	out := c
+	out.Commands = make([]CommandConfig, len(c.Commands))
+	for i, cmd := range c.Commands {
+		out.Commands[i] = cmd.resolveFor(goos)
+	}
+	out.Dirs = make([]DirConfig, len(c.Dirs))
+	for i, d := range c.Dirs {
+		out.Dirs[i] = d.resolveFor(goos)
+	}
+	out.SystemOverlay = make([]OverlayConfig, len(c.SystemOverlay))
+	for i, o := range c.SystemOverlay {
+		out.SystemOverlay[i] = o.resolveFor(goos)
+	}
+	return out
 }
 
 func (c *Config) ApplyDefaults() {

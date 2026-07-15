@@ -119,3 +119,61 @@ func TestEmitPathExpr(t *testing.T) {
 		}
 	}
 }
+
+func TestHomeMarkerIsKnown(t *testing.T) {
+	if err := ValidateKnownFolderMarkers("{dst.HOME}/x"); err != nil {
+		t.Errorf("{dst.HOME} should be valid: %v", err)
+	}
+	if !HasKnownFolderMarker("{dst.HOME}/x") {
+		t.Error("HasKnownFolderMarker should detect {dst.HOME}")
+	}
+}
+
+func TestHomeMarkerRender(t *testing.T) {
+	// Path expression: {dst.HOME} -> $HOME (no concatenation def needed).
+	if got := EmitPathExpr("{dst.HOME}/.config/x"); got != "$HOME + '/.config/x'" {
+		t.Errorf("EmitPathExpr(HOME) = %q, want $HOME + '/.config/x'", got)
+	}
+	if got := EmitPathExpr("{dst.HOME}"); got != "$HOME" {
+		t.Errorf("EmitPathExpr(HOME only) = %q, want $HOME", got)
+	}
+	// Inline replace for run shell.
+	if got := ReplaceMarkers("mkdir -p {dst.HOME}/x"); got != "mkdir -p $HOME/x" {
+		t.Errorf("ReplaceMarkers(HOME) = %q, want mkdir -p $HOME/x", got)
+	}
+	// No definition line emitted for HOME.
+	out := EmitKnownFolderDefs([]string{"HOME", "AppDataFolder"})
+	if strings.Contains(out, "$HOME =") {
+		t.Errorf("EmitKnownFolderDefs must not define $HOME; got:\n%s", out)
+	}
+	if !strings.Contains(out, "$AppDataFolder = [Environment]::GetFolderPath") {
+		t.Errorf("AppDataFolder def still emitted; got:\n%s", out)
+	}
+}
+
+func TestKnownFolderMarkersIncludesHome(t *testing.T) {
+	got := KnownFolderMarkers("{dst.HOME}/x{dst.AppDataFolder}/y")
+	want := []string{"AppDataFolder", "HOME"} // deduped + sorted
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("KnownFolderMarkers = %v, want %v", got, want)
+	}
+}
+
+func TestHasWindowsOnlyKnownFolderMarker(t *testing.T) {
+	// Windows-only marker present -> true.
+	if !HasWindowsOnlyKnownFolderMarker("{dst.AppDataFolder}\\x") {
+		t.Error("Windows-only marker should be detected")
+	}
+	// HOME-only -> false (HOME is cross-platform, allowed on non-Windows).
+	if HasWindowsOnlyKnownFolderMarker("{dst.HOME}/x") {
+		t.Error("HOME is not Windows-only")
+	}
+	// Mixed HOME + Windows-only -> true (a Windows-only marker is present).
+	if !HasWindowsOnlyKnownFolderMarker("{dst.HOME}/x/{dst.AppDataFolder}") {
+		t.Error("mixed string has a Windows-only marker -> true")
+	}
+	// Plain -> false.
+	if HasWindowsOnlyKnownFolderMarker("/etc/x") {
+		t.Error("plain path has no marker")
+	}
+}

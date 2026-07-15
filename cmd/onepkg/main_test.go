@@ -464,14 +464,151 @@ func TestPlatformOutputPathWindows(t *testing.T) {
 	}
 }
 
-func TestBuildForWindowsRunRejectsNonWindows(t *testing.T) {
-	cfg := &Config{Name: "x", Version: "v1", Mode: "run"}
-	err := BuildForPlatform(cfg, "linux-amd64", nil, nil, nil, "")
-	if err == nil {
-		t.Fatal("BuildForPlatform should reject mode=run on non-windows platform")
+func TestBuildForPlatformRunAllowedOnUnix(t *testing.T) {
+	out := t.TempDir() // avoid writing run .sh artifacts into the repo cwd
+	cfg := &Config{Name: "x", Version: "v1", Mode: "run", Commands: []CommandConfig{{Shell: "echo hi"}}}
+	// mode=run is no longer Windows-only; linux/darwin must reach the run builder
+	// (they may fail later for other reasons, but NOT with "Windows-only").
+	for _, p := range []string{"linux-amd64", "darwin-arm64"} {
+		err := BuildForPlatform(cfg, p, nil, nil, nil, out)
+		if err != nil && strings.Contains(err.Error(), "Windows-only") {
+			t.Errorf("run mode must not be Windows-only on %s: %v", p, err)
+		}
 	}
-	if !strings.Contains(err.Error(), "Windows-only") {
+}
+
+func TestBuildForUnixRunLinuxShellOnly(t *testing.T) {
+	projectDir := t.TempDir()
+	configContent := `
+name = "diag"
+version = "v1.0.0"
+mode = "run"
+
+[[commands]]
+shell = "echo hello"
+shell_linux = "mkdir -p {dst.HOME}/.local/share/diag"
+`
+	configPath := filepath.Join(projectDir, "config.toml")
+	os.WriteFile(configPath, []byte(configContent), 0644)
+
+	cfg, err := ParseConfig(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.ApplyDefaults()
+	if err := cfg.Validate(projectDir); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+
+	outputDir := filepath.Join(projectDir, "packages")
+	os.MkdirAll(outputDir, 0755)
+
+	if err := BuildForPlatform(cfg, "linux-amd64", nil, nil, nil, outputDir); err != nil {
+		t.Fatalf("BuildForPlatform linux run: %v", err)
+	}
+	script, err := os.ReadFile(filepath.Join(outputDir, "diag_v1.0.0_linux_amd64.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(script)
+	if !strings.HasPrefix(s, "#!/bin/bash") {
+		t.Error("run .sh must start with #!/bin/bash")
+	}
+	// Resolved linux shell + HOME substitution applied.
+	if !strings.Contains(s, `eval "mkdir -p $HOME/.local/share/diag"`) {
+		t.Errorf("linux run .sh missing resolved/HOME-substituted shell; got:\n%s", s)
+	}
+	// No macOS dialog on linux.
+	if strings.Contains(s, "osascript") {
+		t.Error("linux run .sh must not contain osascript")
+	}
+	// No install machinery.
+	if strings.Contains(s, "cmd_install") {
+		t.Error("run .sh must not contain install machinery")
+	}
+}
+
+func TestBuildForUnixRunDarwinHasDialog(t *testing.T) {
+	projectDir := t.TempDir()
+	configContent := `
+name = "diag"
+version = "v1.0.0"
+mode = "run"
+
+[[commands]]
+shell = "echo hi"
+`
+	configPath := filepath.Join(projectDir, "config.toml")
+	os.WriteFile(configPath, []byte(configContent), 0644)
+	cfg, err := ParseConfig(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.ApplyDefaults()
+	if err := cfg.Validate(projectDir); err != nil {
+		t.Fatal(err)
+	}
+	outputDir := filepath.Join(projectDir, "packages")
+	os.MkdirAll(outputDir, 0755)
+
+	if err := BuildForPlatform(cfg, "darwin-arm64", nil, nil, nil, outputDir); err != nil {
+		t.Fatalf("BuildForPlatform darwin run: %v", err)
+	}
+	s, err := os.ReadFile(filepath.Join(outputDir, "diag_v1.0.0_darwin_arm64.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(s), "osascript") {
+		t.Error("darwin run .sh must contain osascript dialog")
+	}
+}
+
+func TestBuildForPlatformAllowsHomeOnLinux(t *testing.T) {
+	out := t.TempDir()
+	cfg := &Config{
+		Name: "x", Version: "v1", Mode: "install",
+		Dirs: []DirConfig{{Path: "{dst.HOME}/.config/x", Mode: "0755"}},
+	}
+	// {dst.HOME} must NOT be rejected on linux (unlike Windows-only markers)...
+	if err := BuildForPlatform(cfg, "linux-amd64", nil, nil, nil, out); err != nil {
+		t.Fatalf("{dst.HOME} should be allowed on linux: %v", err)
+	}
+	// ...and it must be substituted to $HOME in the install .sh.
+	script, err := os.ReadFile(filepath.Join(out, "x_v1_linux_amd64.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := string(script); !strings.Contains(s, `$HOME/.config/x`) || strings.Contains(s, "{dst.HOME}") {
+		t.Errorf("{dst.HOME} should be substituted to $HOME; got:\n%s", s)
+	}
+}
+
+func TestBuildForPlatformStillRejectsWindowsOnlyMarkerOnLinuxResolvedPath(t *testing.T) {
+	// path_macos carries a Windows-only marker; building for macos uses it as the
+	// resolved path, so it must be rejected.
+	cfg := &Config{
+		Name: "x", Version: "v1", Mode: "install",
+		Dirs: []DirConfig{{Path: "/var/lib/x", PathMacos: "{dst.AppDataFolder}\\x", Mode: "0755"}},
+	}
+	err := BuildForPlatform(cfg, "darwin-arm64", nil, nil, nil, "")
+	if err == nil {
+		t.Fatal("should reject Windows-only marker in resolved macos path")
+	}
+	if !strings.Contains(err.Error(), "not supported on darwin") {
 		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestBuildForPlatformIgnoresPathWindowsOnLinux(t *testing.T) {
+	out := t.TempDir()
+	// path_windows has a Windows-only marker, but a linux build does not use it,
+	// so the build must succeed.
+	cfg := &Config{
+		Name: "x", Version: "v1", Mode: "install",
+		Dirs: []DirConfig{{Path: "/var/lib/x", PathWindows: "{dst.AppDataFolder}\\x", Mode: "0755"}},
+	}
+	if err := BuildForPlatform(cfg, "linux-amd64", nil, nil, nil, out); err != nil {
+		t.Fatalf("path_windows marker must not affect a linux build: %v", err)
 	}
 }
 
@@ -873,4 +1010,40 @@ func relPathsOf(entries []FileEntry) []string {
 		out[i] = e.RelPath
 	}
 	return out
+}
+
+func TestBuildForUnixRunRejectsUnmatchedOverrideExec(t *testing.T) {
+	projectDir := t.TempDir()
+	binDir := filepath.Join(projectDir, "bin")
+	os.MkdirAll(binDir, 0755)
+	os.WriteFile(filepath.Join(binDir, "cleanup"), []byte("x"), 0755)
+
+	configContent := `
+name = "x"
+version = "v1"
+mode = "run"
+items = ["bin/cleanup"]
+
+[[commands]]
+exec = "bin/cleanup"
+exec_linux = "bin/does-not-exist"
+`
+	configPath := filepath.Join(projectDir, "config.toml")
+	os.WriteFile(configPath, []byte(configContent), 0644)
+	cfg, err := ParseConfig(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.ApplyDefaults()
+	if err := cfg.Validate(projectDir); err != nil {
+		t.Fatalf("Validate (base exec matches): %v", err)
+	}
+	// linux build uses exec_linux, which is not an item -> build-time error.
+	err = BuildForPlatform(cfg, "linux-amd64", nil, nil, nil, "")
+	if err == nil {
+		t.Fatal("build should reject exec_linux that matches no item")
+	}
+	if !strings.Contains(err.Error(), "not found in items") {
+		t.Errorf("unexpected error: %v", err)
+	}
 }

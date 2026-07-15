@@ -17,6 +17,21 @@ type OverlaySpec struct {
 	Item   string
 }
 
+// shellCheckArch returns the bash check_arch function used by both the install
+// and run self-extracting scripts. EXPECTED_ARCH is set by the caller before
+// the function is invoked.
+func shellCheckArch() string {
+	return `check_arch() {
+    local arch=$(uname -m)
+    if [ "$arch" != "$EXPECTED_ARCH" ]; then
+        echo "Error: This package is for $EXPECTED_ARCH, current system is $arch"
+        exit 1
+    fi
+}
+
+`
+}
+
 type ShellConfig struct {
 	Name           string
 	Version        string
@@ -78,15 +93,9 @@ func GenerateShellInstaller(cfg ShellConfig) (string, error) {
     fi
 }
 
-check_arch() {
-    local arch=$(uname -m)
-    if [ "$arch" != "$EXPECTED_ARCH" ]; then
-        echo "Error: This package is for $EXPECTED_ARCH, current system is $arch"
-        exit 1
-    fi
-}
-
-check_root() {
+`)
+	b.WriteString(shellCheckArch())
+	b.WriteString(`check_root() {
     if [ "$(id -u)" != "0" ]; then
         echo "Error: This operation requires root privileges (use sudo)"
         exit 1
