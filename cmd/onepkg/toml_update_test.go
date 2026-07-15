@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -639,6 +640,141 @@ level = "info"
 	}
 	if !strings.Contains(s, "file = \"/tmp/log\"") {
 		t.Errorf("file key not found in [log] section, got:\n%s", s)
+	}
+}
+
+func TestValueRepresentations(t *testing.T) {
+	tests := []struct {
+		name string
+		val  interface{}
+		want []string
+	}{
+		{"empty string", "", []string{`""`, `''`}},
+		{"plain string", "hello", []string{`"hello"`, `'hello'`}},
+		{"string with apostrophe", "it's", []string{`"it's"`}},
+		{"string with newline", "a\nb", []string{`"a\nb"`}},
+		{"int", int64(5), []string{`5`}},
+		{"bool", true, []string{`true`}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := valueRepresentations(tt.val)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("valueRepresentations(%v) = %v, want %v", tt.val, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRunTomlUpdate_SingleQuotedString(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.toml"
+	// RustDesk2.toml stores string values as single-quoted literal strings
+	// (e.g. custom-rendezvous-server = ''). The updater must locate and
+	// replace them regardless of the on-disk quote style.
+	content := "[options]\ncustom-rendezvous-server = ''\nkey = ''\n"
+	os.WriteFile(path, []byte(content), 0644)
+
+	err := runTomlUpdateAdd([]string{"options.custom-rendezvous-server", "1mtok.com:21116", path})
+	if err != nil {
+		t.Fatalf("runTomlUpdateAdd: %v", err)
+	}
+
+	tree, err := toml.LoadFile(path)
+	if err != nil {
+		t.Fatalf("result is not valid TOML: %v\ncontent: %s", err, mustRead(path))
+	}
+	if got := tree.Get("options.custom-rendezvous-server"); got != "1mtok.com:21116" {
+		t.Errorf("options.custom-rendezvous-server = %v, want 1mtok.com:21116\ncontent: %s", got, mustRead(path))
+	}
+	// Sibling key untouched.
+	if got := tree.Get("options.key"); got != "" {
+		t.Errorf("options.key = %v, want empty string (untouched)", got)
+	}
+}
+
+func TestRunTomlUpdate_SingleQuotedStringNonEmpty(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.toml"
+	content := "[options]\ncustom-rendezvous-server = 'old.example.com:21116'\n"
+	os.WriteFile(path, []byte(content), 0644)
+
+	err := runTomlUpdateAdd([]string{"options.custom-rendezvous-server", "new.example.com:21116", path})
+	if err != nil {
+		t.Fatalf("runTomlUpdateAdd: %v", err)
+	}
+
+	tree, err := toml.LoadFile(path)
+	if err != nil {
+		t.Fatalf("result is not valid TOML: %v\ncontent: %s", err, mustRead(path))
+	}
+	if got := tree.Get("options.custom-rendezvous-server"); got != "new.example.com:21116" {
+		t.Errorf("got %v, want new.example.com:21116\ncontent: %s", got, mustRead(path))
+	}
+}
+
+func TestRunTomlUpdate_SingleQuotedAlreadySet(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.toml"
+	// Already set with the same value: the file must be left untouched,
+	// preserving its single-quoted style (no spurious rewrite).
+	content := "[options]\ncustom-rendezvous-server = '1mtok.com:21116'\n"
+	os.WriteFile(path, []byte(content), 0644)
+
+	err := runTomlUpdateAdd([]string{"options.custom-rendezvous-server", "1mtok.com:21116", path})
+	if err != nil {
+		t.Fatalf("runTomlUpdateAdd: %v", err)
+	}
+
+	after, _ := os.ReadFile(path)
+	if string(after) != content {
+		t.Errorf("file should not change when value already set\nbefore: %q\nafter: %q", content, string(after))
+	}
+}
+
+func TestRunTomlUpdate_SingleQuotedBackslash(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.toml"
+	// A single-quoted literal string holds a raw backslash (no escaping on
+	// disk); the literal-form candidate must match it and the new value must
+	// be written as an escaped double-quoted string.
+	os.WriteFile(path, []byte("[options]\npath = 'C:\\Users\\test'\n"), 0644)
+
+	err := runTomlUpdateAdd([]string{"options.path", `E:\backup`, path})
+	if err != nil {
+		t.Fatalf("runTomlUpdateAdd: %v", err)
+	}
+
+	tree, err := toml.LoadFile(path)
+	if err != nil {
+		t.Fatalf("result is not valid TOML: %v\ncontent: %s", err, mustRead(path))
+	}
+	if got := tree.Get("options.path"); got != `E:\backup` {
+		t.Errorf("options.path = %v, want E:\\backup\ncontent: %s", got, mustRead(path))
+	}
+}
+
+func TestRunTomlUpdate_SingleQuotedTrailingComment(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/test.toml"
+	// Trailing comment on a single-quoted line must survive the rewrite to
+	// the canonical double-quoted form.
+	content := "[options]\ncustom-rendezvous-server = '' # rustdesk\n"
+	os.WriteFile(path, []byte(content), 0644)
+
+	err := runTomlUpdateAdd([]string{"options.custom-rendezvous-server", "1mtok.com:21116", path})
+	if err != nil {
+		t.Fatalf("runTomlUpdateAdd: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	s := string(data)
+	want := `custom-rendezvous-server = "1mtok.com:21116" # rustdesk`
+	if !strings.Contains(s, want) {
+		t.Errorf("expected value updated and comment preserved, got:\n%s", s)
+	}
+	if _, err := toml.Load(s); err != nil {
+		t.Fatalf("result is not valid TOML: %v\ncontent: %s", err, s)
 	}
 }
 

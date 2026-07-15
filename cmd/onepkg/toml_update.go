@@ -79,15 +79,25 @@ func tomlUpdateCore(args []string, allowAdd bool) error {
 			newVal = args[1]
 		}
 		newStr := formatTOMLValue(newVal)
-		oldStr := formatTOMLValue(oldVal)
-		if oldStr == newStr {
-			return nil // already set
+		// The on-disk value may be formatted differently from the canonical
+		// form formatTOMLValue emits (always double-quoted). A file commonly
+		// stores the same value as a single-quoted literal string — e.g.
+		// RustDesk2.toml writes key = ''. Try each possible representation so
+		// the in-place replacement can locate the existing value regardless of
+		// quote style.
+		reps := valueRepresentations(oldVal)
+		for _, oldStr := range reps {
+			if oldStr == newStr {
+				return nil // already set
+			}
 		}
-		result := replaceValueInContent(string(raw), key, oldStr, newStr)
-		if result == string(raw) {
-			return fmt.Errorf("could not update key %q in-place", key)
+		for _, oldStr := range reps {
+			result := replaceValueInContent(string(raw), key, oldStr, newStr)
+			if result != string(raw) {
+				return os.WriteFile(filePath, []byte(result), 0644)
+			}
 		}
-		return os.WriteFile(filePath, []byte(result), 0644)
+		return fmt.Errorf("could not update key %q in-place", key)
 	}
 
 	// --add new key: text-based append (no re-serialization)
@@ -327,6 +337,40 @@ func formatTOMLValue(v interface{}) string {
 	default:
 		return fmt.Sprintf("%v", val)
 	}
+}
+
+// valueRepresentations returns the on-disk TOML renderings a parsed value might
+// have. formatTOMLValue produces one canonical form (double-quoted basic
+// strings), but the same value can appear in a file under a different form —
+// most often a single-quoted literal string. The updater tries each
+// representation when locating the existing value to replace, so quote-style
+// differences do not cause spurious "could not update key in-place" errors.
+func valueRepresentations(v interface{}) []string {
+	s, isStr := v.(string)
+	if !isStr {
+		return []string{formatTOMLValue(v)}
+	}
+	reps := []string{formatTOMLValue(v)} // double-quoted basic string
+	// Single-quoted literal strings hold their content raw (no escapes), so
+	// they cannot contain a single quote or control characters other than tab.
+	if !strings.ContainsRune(s, '\'') && isLiteralSafe(s) {
+		reps = append(reps, "'"+s+"'")
+	}
+	return reps
+}
+
+// isLiteralSafe reports whether s can be represented as a single-line TOML
+// literal string: no control characters other than tab.
+func isLiteralSafe(s string) bool {
+	for _, r := range s {
+		if r == '\t' {
+			continue
+		}
+		if r < 0x20 || r == 0x7f {
+			return false
+		}
+	}
+	return true
 }
 
 // keyExistsInTree checks if a dotted key path exists in the tree.
