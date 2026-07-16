@@ -215,6 +215,26 @@ recovery_delay_ms = 5000       # delay before restart on failure in ms (default:
 #
 # [[commands]]
 # shell = "Copy-Item profile.json \"{dst.AppDataFolder}\\MyApp\\\""
+#
+# ── Cross-platform {dst.*} markers ───────────────────────────────────────────
+# Four markers resolve on the TARGET at install/run time on ALL platforms
+# (Linux, macOS, and Windows), spelled identically everywhere. They are
+# environment/automatic variables, so no runtime definition line is emitted.
+#
+#   {dst.HOME}      Linux/macOS: $HOME                  Windows: $HOME
+#   {dst.TMPDIR}    ${TMPDIR:-/tmp}                              $env:TEMP
+#   {dst.USER}      ${USER:-$(id -un)}                           $env:USERNAME
+#   {dst.HOSTNAME}  ${HOSTNAME:-$(hostname)}                     $env:COMPUTERNAME
+#
+# Like the Windows-only folders above, they are valid only in dirs[].path,
+# system_overlay[].system, and run-mode commands[].args/.shell (and their
+# <field>_<os> variants). Unlike the Windows-only folders, they are NOT
+# rejected on linux/darwin builds.
+#
+# Run example (one command list; each platform resolves the marker itself):
+# [[commands]]
+# shell         = "mkdir -p {dst.TMPDIR}/diag && echo {dst.USER}@{dst.HOSTNAME}"
+# shell_windows = "New-Item -ItemType Directory -Force \"$env:TEMP\\diag\" | Out-Null"
 
 # --- Host environment variables (build-time, all platforms) ---
 # {env.NAME} is replaced at BUILD time with the build host's value of the

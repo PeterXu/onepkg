@@ -1047,3 +1047,122 @@ exec_linux = "bin/does-not-exist"
 		t.Errorf("unexpected error: %v", err)
 	}
 }
+
+func TestBuildForPlatformAllowsCrossPlatformDstOnLinux(t *testing.T) {
+	out := t.TempDir()
+	cfg := &Config{
+		Name: "x", Version: "v1", Mode: "install",
+		Dirs: []DirConfig{{Path: "{dst.TMPDIR}/x/{dst.USER}", Mode: "0755"}},
+	}
+	// Cross-platform markers must NOT be rejected on linux (unlike Windows-only).
+	if err := BuildForPlatform(cfg, "linux-amd64", nil, nil, nil, out); err != nil {
+		t.Fatalf("cross-platform markers should be allowed on linux: %v", err)
+	}
+	script, err := os.ReadFile(filepath.Join(out, "x_v1_linux_amd64.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(script)
+	want := `${TMPDIR:-/tmp}/x/${USER:-$(id -un)}`
+	if !strings.Contains(s, want) {
+		t.Errorf("linux install .sh missing unix tokens %q; got:\n%s", want, s)
+	}
+	if strings.Contains(s, "{dst.") {
+		t.Errorf("raw {dst. marker must not survive into the .sh; got:\n%s", s)
+	}
+}
+
+func TestBuildForUnixRunLinuxCrossPlatformDst(t *testing.T) {
+	projectDir := t.TempDir()
+	configContent := `
+name = "diag"
+version = "v1.0.0"
+mode = "run"
+
+[[commands]]
+shell = "echo hi"
+shell_linux = "mkdir -p {dst.TMPDIR}/diag && echo {dst.USER}@{dst.HOSTNAME}"
+`
+	configPath := filepath.Join(projectDir, "config.toml")
+	os.WriteFile(configPath, []byte(configContent), 0644)
+
+	cfg, err := ParseConfig(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.ApplyDefaults()
+	if err := cfg.Validate(projectDir); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	outputDir := filepath.Join(projectDir, "packages")
+	os.MkdirAll(outputDir, 0755)
+
+	if err := BuildForPlatform(cfg, "linux-amd64", nil, nil, nil, outputDir); err != nil {
+		t.Fatalf("BuildForPlatform linux run: %v", err)
+	}
+	script, err := os.ReadFile(filepath.Join(outputDir, "diag_v1.0.0_linux_amd64.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(script)
+	want := `mkdir -p ${TMPDIR:-/tmp}/diag && echo ${USER:-$(id -un)}@${HOSTNAME:-$(hostname)}`
+	if !strings.Contains(s, want) {
+		t.Errorf("linux run .sh missing unix-token-substituted shell; got:\n%s", s)
+	}
+	if strings.Contains(s, "{dst.") {
+		t.Errorf("raw {dst. marker must not survive into run .sh; got:\n%s", s)
+	}
+}
+
+func TestBuildForPlatformWindowsCrossPlatformDstDirs(t *testing.T) {
+	projectDir := t.TempDir()
+	binDir := filepath.Join(projectDir, "bin")
+	os.MkdirAll(binDir, 0755)
+	os.WriteFile(filepath.Join(binDir, "myapp.exe"), []byte("fake-exe"), 0755)
+
+	content := `
+name = "myapp"
+version = "v1.0.0"
+items = ["bin/myapp.exe"]
+
+[[dirs]]
+path = "{dst.TMPDIR}\\myapp"
+mode = "0755"
+`
+	configPath := filepath.Join(projectDir, "config.toml")
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	cfg, err := ParseConfig(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.ApplyDefaults()
+	if err := cfg.Validate(projectDir); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	resolved, err := ResolveItems(projectDir, cfg.Items, "windows-amd64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := CollectFilesResolved(projectDir, resolved, cfg.Exclude)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outputDir := filepath.Join(projectDir, "packages")
+	os.MkdirAll(outputDir, 0755)
+
+	if err := BuildForPlatform(cfg, "windows-amd64", entries, nil, nil, outputDir); err != nil {
+		t.Fatalf("BuildForPlatform windows should accept {dst.TMPDIR} dirs: %v", err)
+	}
+	exe, err := os.ReadFile(filepath.Join(outputDir, "myapp_v1.0.0_windows_amd64.exe"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Cross-platform marker renders inline as $env:TEMP; no $TMPDIR definition.
+	if !bytes.Contains(exe, []byte("$DIR_0_PATH = $env:TEMP + '\\myapp'")) {
+		t.Errorf("embedded install.ps1 missing $env:TEMP path expr; got (tail):\n%s", exe[len(exe)-400:])
+	}
+	if bytes.Contains(exe, []byte("$TMPDIR =")) {
+		t.Error("cross-platform markers must not emit a $TMPDIR definition")
+	}
+}

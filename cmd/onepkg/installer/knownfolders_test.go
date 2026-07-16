@@ -177,3 +177,86 @@ func TestHasWindowsOnlyKnownFolderMarker(t *testing.T) {
 		t.Error("plain path has no marker")
 	}
 }
+
+func TestCrossPlatformDstMarkersKnown(t *testing.T) {
+	// All four cross-platform markers are recognized as known and are not Windows-only.
+	for _, name := range []string{"HOME", "TMPDIR", "USER", "HOSTNAME"} {
+		if err := ValidateKnownFolderMarkers("{dst." + name + "}/x"); err != nil {
+			t.Errorf("{dst.%s} should validate: %v", name, err)
+		}
+		if !HasKnownFolderMarker("{dst." + name + "}/x") {
+			t.Errorf("HasKnownFolderMarker should detect {dst.%s}", name)
+		}
+		if isWindowsOnlyFolderName(name) {
+			t.Errorf("%s must not be Windows-only", name)
+		}
+	}
+}
+
+func TestReplaceCrossPlatformDst(t *testing.T) {
+	// Unix tokens (identical for linux and darwin).
+	for _, goos := range []string{"linux", "darwin"} {
+		cases := []struct{ in, want string }{
+			{"{dst.HOME}/x", "$HOME/x"},
+			{"{dst.TMPDIR}/x", "${TMPDIR:-/tmp}/x"},
+			{"{dst.USER}", "${USER:-$(id -un)}"},
+			{"{dst.HOSTNAME}-host", "${HOSTNAME:-$(hostname)}-host"},
+			{"pre {dst.TMPDIR} {dst.USER} post", "pre ${TMPDIR:-/tmp} ${USER:-$(id -un)} post"},
+		}
+		for _, c := range cases {
+			if got := ReplaceCrossPlatformDst(c.in, goos); got != c.want {
+				t.Errorf("ReplaceCrossPlatformDst(%q, %s) = %q, want %q", c.in, goos, got, c.want)
+			}
+		}
+	}
+	// Windows tokens.
+	wcases := []struct{ in, want string }{
+		{"{dst.HOME}", "$HOME"},
+		{"{dst.TMPDIR}\\x", "$env:TEMP\\x"},
+		{"{dst.USER}", "$env:USERNAME"},
+		{"{dst.HOSTNAME}", "$env:COMPUTERNAME"},
+	}
+	for _, c := range wcases {
+		if got := ReplaceCrossPlatformDst(c.in, "windows"); got != c.want {
+			t.Errorf("ReplaceCrossPlatformDst(%q, windows) = %q, want %q", c.in, got, c.want)
+		}
+	}
+	// Unknown marker left intact (validation rejects it earlier).
+	if got := ReplaceCrossPlatformDst("{dst.Bogus}/x", "linux"); got != "{dst.Bogus}/x" {
+		t.Errorf("unknown marker should be left intact, got %q", got)
+	}
+}
+
+func TestCrossPlatformDstWindowsRender(t *testing.T) {
+	// EmitPathExpr renders cross-platform markers inline as PowerShell tokens
+	// (no $<Name> definition, no concatenation def needed).
+	peCases := []struct{ in, want string }{
+		{`{dst.TMPDIR}\myapp`, `$env:TEMP + '\myapp'`},
+		{`{dst.USER}\cfg`, `$env:USERNAME + '\cfg'`},
+		{`{dst.HOSTNAME}`, `$env:COMPUTERNAME`},
+		{`{dst.HOME}\x`, `$HOME + '\x'`}, // regression
+	}
+	for _, c := range peCases {
+		if got := EmitPathExpr(c.in); got != c.want {
+			t.Errorf("EmitPathExpr(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+	// ReplaceMarkers (run shell/args inline).
+	if got := ReplaceMarkers("echo {dst.TMPDIR} {dst.USER}"); got != "echo $env:TEMP $env:USERNAME" {
+		t.Errorf("ReplaceMarkers = %q, want echo $env:TEMP $env:USERNAME", got)
+	}
+	// EmitKnownFolderDefs emits NO definition for any cross-platform marker.
+	for _, name := range []string{"HOME", "TMPDIR", "USER", "HOSTNAME"} {
+		if out := EmitKnownFolderDefs([]string{name}); out != "" {
+			t.Errorf("EmitKnownFolderDefs(%q) should be empty, got %q", name, out)
+		}
+	}
+	// Mixed: still emits defs for Windows-only folders, skipping cross-platform ones.
+	out := EmitKnownFolderDefs([]string{"TMPDIR", "AppDataFolder"})
+	if !strings.Contains(out, "$AppDataFolder = [Environment]::GetFolderPath") {
+		t.Errorf("AppDataFolder def missing; got:\n%s", out)
+	}
+	if strings.Contains(out, "TMPDIR") {
+		t.Errorf("cross-platform name must not get a def; got:\n%s", out)
+	}
+}

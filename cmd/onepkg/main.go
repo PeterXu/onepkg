@@ -224,14 +224,15 @@ func BuildForPlatform(cfg *Config, platform string, entries []FileEntry, tarData
 				return fmt.Errorf("Windows known-folder variable in system_overlay[].system %q is not supported on %s; build for windows or remove it", o.System, goos)
 			}
 		}
-		// Substitute the cross-platform {dst.HOME} marker -> $HOME on Unix targets
+		// Substitute cross-platform {dst.*} markers -> bash tokens on Unix targets
 		// (install-mode paths here; run-mode commands are substituted in
-		// BuildForUnixRun). The shell expands $HOME at runtime.
+		// BuildForUnixRun). The shell expands them at runtime. Windows-only
+		// markers were rejected above, so only the cross-platform set remains.
 		for i := range cfg.Dirs {
-			cfg.Dirs[i].Path = substituteHomeUnix(cfg.Dirs[i].Path)
+			cfg.Dirs[i].Path = installer.ReplaceCrossPlatformDst(cfg.Dirs[i].Path, goos)
 		}
 		for i := range cfg.SystemOverlay {
-			cfg.SystemOverlay[i].System = substituteHomeUnix(cfg.SystemOverlay[i].System)
+			cfg.SystemOverlay[i].System = installer.ReplaceCrossPlatformDst(cfg.SystemOverlay[i].System, goos)
 		}
 	}
 
@@ -554,11 +555,12 @@ func BuildForUnixRun(cfg *Config, platform string, entries []FileEntry, outputDi
 	commands := make([]installer.CommandSpec, 0, len(cfg.Commands))
 	for _, c := range cfg.Commands {
 		// cfg is already resolved for goos; collapse to a CommandSpec and
-		// substitute {dst.HOME} -> $HOME in the effective strings.
+		// substitute cross-platform {dst.*} markers -> bash tokens. (Exec is a
+		// defensive no-op: the stray-field check forbids {dst.*} in exec.)
 		commands = append(commands, installer.CommandSpec{
-			Exec:  substituteHomeUnix(c.Exec),
-			Args:  substituteHomeUnixArgs(c.Args),
-			Shell: substituteHomeUnix(c.Shell),
+			Exec:  installer.ReplaceCrossPlatformDst(c.Exec, goos),
+			Args:  replaceCrossPlatformDstArgs(c.Args, goos),
+			Shell: installer.ReplaceCrossPlatformDst(c.Shell, goos),
 		})
 	}
 
@@ -580,18 +582,13 @@ func BuildForUnixRun(cfg *Config, platform string, entries []FileEntry, outputDi
 	return os.WriteFile(outputPath, []byte(script), 0755)
 }
 
-// substituteHomeUnix replaces the cross-platform {dst.HOME} marker with the
-// literal $HOME token for Unix targets (the shell expands $HOME at runtime).
-// Other {dst.*} markers are Windows-only and rejected by the build guard, so
-// they never reach here on a unix build.
-func substituteHomeUnix(s string) string {
-	return strings.ReplaceAll(s, "{dst.HOME}", "$HOME")
-}
-
-func substituteHomeUnixArgs(args []string) []string {
+// replaceCrossPlatformDstArgs applies installer.ReplaceCrossPlatformDst to each
+// argument (run-mode commands). Exec/Shell are substituted directly at the
+// call site; only the slice needs a helper.
+func replaceCrossPlatformDstArgs(args []string, goos string) []string {
 	out := make([]string, len(args))
 	for i, a := range args {
-		out[i] = substituteHomeUnix(a)
+		out[i] = installer.ReplaceCrossPlatformDst(a, goos)
 	}
 	return out
 }
